@@ -1,4 +1,4 @@
-"""Tests for hermes_cli.doctor."""
+"""Tests for drewgent_cli.doctor."""
 
 import os
 import sys
@@ -8,10 +8,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import hermes_cli.doctor as doctor
-import hermes_cli.gateway as gateway_cli
-from hermes_cli import doctor as doctor_mod
-from hermes_cli.doctor import _has_provider_env_config
+import drewgent_cli.doctor as doctor
+import drewgent_cli.gateway as gateway_cli
+from drewgent_cli import doctor as doctor_mod
+from drewgent_cli.doctor import _has_provider_env_config
 
 
 class TestProviderEnvDetection:
@@ -78,12 +78,12 @@ class TestHonchoDoctorConfigDetection:
 def test_run_doctor_sets_interactive_env_for_tool_checks(monkeypatch, tmp_path):
     """Doctor should present CLI-gated tools as available in CLI context."""
     project_root = tmp_path / "project"
-    hermes_home = tmp_path / ".hermes"
+    drewgent_home = tmp_path / ".hermes"
     project_root.mkdir()
-    hermes_home.mkdir()
+    drewgent_home.mkdir()
 
     monkeypatch.setattr(doctor_mod, "PROJECT_ROOT", project_root)
-    monkeypatch.setattr(doctor_mod, "HERMES_HOME", hermes_home)
+    monkeypatch.setattr(doctor_mod, "DREW_HOME", drewgent_home)
     monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
 
     seen = {}
@@ -105,7 +105,7 @@ def test_run_doctor_sets_interactive_env_for_tool_checks(monkeypatch, tmp_path):
 
 
 def test_check_gateway_service_linger_warns_when_disabled(monkeypatch, tmp_path, capsys):
-    unit_path = tmp_path / "hermes-gateway.service"
+    unit_path = tmp_path / "drewgent-gateway.service"
     unit_path.write_text("[Unit]\n")
 
     monkeypatch.setattr(gateway_cli, "is_linux", lambda: True)

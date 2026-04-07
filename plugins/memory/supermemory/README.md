@@ -10,14 +10,14 @@ Semantic long-term memory with profile recall, semantic search, explicit memory 
 ## Setup
 
 ```bash
-hermes memory setup    # select "supermemory"
+drewgent memory setup    # select "supermemory"
 ```
 
 Or manually:
 
 ```bash
-hermes config set memory.provider supermemory
-echo 'SUPERMEMORY_API_KEY=your-key-here' >> ~/.hermes/.env
+drewgent config set memory.provider supermemory
+echo 'SUPERMEMORY_API_KEY=your-key-here' >> ~/.drewgent/.env
 ```
 
 ## Config
@@ -26,7 +26,7 @@ Config file: `$HERMES_HOME/supermemory.json`
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `container_tag` | `hermes` | Container tag used for search and writes |
+| `container_tag` | `drewgent`` | Container tag used for search and writes |
 | `auto_recall` | `true` | Inject relevant memory context before turns |
 | `auto_capture` | `true` | Store cleaned user-assistant turns after each response |
 | `max_recall_results` | `10` | Max recalled items to format into context |
@@ -46,7 +46,7 @@ Config file: `$HERMES_HOME/supermemory.json`
 
 ## Behavior
 
-When enabled, Hermes can:
+When enabled, Drewgent can:
 
 - prefetch relevant memory context before each turn
 - store cleaned conversation turns after each completed response

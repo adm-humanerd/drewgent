@@ -1,4 +1,4 @@
-"""Tests for hermes_cli/logs.py — log viewing and filtering."""
+"""Tests for drewgent_cli/logs.py — log viewing and filtering."""
 
 import os
 import textwrap
@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from hermes_cli.logs import (
+from drewgent_cli.logs import (
     LOG_FILES,
     _extract_level,
     _matches_filters,
@@ -27,8 +27,8 @@ from hermes_cli.logs import (
 
 @pytest.fixture
 def log_dir(tmp_path, monkeypatch):
-    """Create a fake HERMES_HOME with a logs/ directory."""
-    home = Path(os.environ["HERMES_HOME"])
+    """Create a fake DREW_HOME with a logs/ directory."""
+    home = Path(os.environ["DREW_HOME"])
     logs = home / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     return logs

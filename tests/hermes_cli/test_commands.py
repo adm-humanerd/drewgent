@@ -3,7 +3,7 @@
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 
-from hermes_cli.commands import (
+from drewgent_cli.commands import (
     COMMAND_REGISTRY,
     COMMANDS,
     COMMANDS_BY_CATEGORY,
@@ -261,7 +261,7 @@ class TestGatewayConfigGate:
         # Write a config with the gate off (default)
         config_file = tmp_path / "config.yaml"
         config_file.write_text("display:\n  tool_progress_command: false\n")
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
 
         lines = gateway_help_lines()
         joined = "\n".join(lines)
@@ -271,7 +271,7 @@ class TestGatewayConfigGate:
         """When the config gate is truthy, the command should appear in help."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("display:\n  tool_progress_command: true\n")
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
 
         lines = gateway_help_lines()
         joined = "\n".join(lines)
@@ -280,7 +280,7 @@ class TestGatewayConfigGate:
     def test_config_gate_excluded_from_telegram_when_off(self, tmp_path, monkeypatch):
         config_file = tmp_path / "config.yaml"
         config_file.write_text("display:\n  tool_progress_command: false\n")
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
 
         names = {name for name, _ in telegram_bot_commands()}
         assert "verbose" not in names
@@ -288,7 +288,7 @@ class TestGatewayConfigGate:
     def test_config_gate_included_in_telegram_when_on(self, tmp_path, monkeypatch):
         config_file = tmp_path / "config.yaml"
         config_file.write_text("display:\n  tool_progress_command: true\n")
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
 
         names = {name for name, _ in telegram_bot_commands()}
         assert "verbose" in names
@@ -296,7 +296,7 @@ class TestGatewayConfigGate:
     def test_config_gate_excluded_from_slack_when_off(self, tmp_path, monkeypatch):
         config_file = tmp_path / "config.yaml"
         config_file.write_text("display:\n  tool_progress_command: false\n")
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
 
         mapping = slack_subcommand_map()
         assert "verbose" not in mapping
@@ -304,7 +304,7 @@ class TestGatewayConfigGate:
     def test_config_gate_included_in_slack_when_on(self, tmp_path, monkeypatch):
         config_file = tmp_path / "config.yaml"
         config_file.write_text("display:\n  tool_progress_command: true\n")
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
 
         mapping = slack_subcommand_map()
         assert "verbose" in mapping
@@ -658,7 +658,7 @@ class TestTelegramMenuCommands:
             "    telegram:\n"
             "      - my-disabled-skill\n"
         )
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
 
         # Mock get_skill_commands to return two skills
         fake_skills_dir = str(tmp_path / "skills")
@@ -692,7 +692,7 @@ class TestTelegramMenuCommands:
         from unittest.mock import patch
         import re
 
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
 
         fake_skills_dir = str(tmp_path / "skills")
         fake_cmds = {
@@ -725,7 +725,7 @@ class TestTelegramMenuCommands:
         """Skills whose names sanitize to empty string are silently dropped."""
         from unittest.mock import patch
 
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
 
         fake_skills_dir = str(tmp_path / "skills")
         fake_cmds = {
@@ -796,7 +796,7 @@ class TestDiscordSkillCommands:
                 "skill_dir": f"{fake_skills_dir}/code-review",
             },
         }
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
         (tmp_path / "skills").mkdir(exist_ok=True)
         with (
             patch("agent.skill_commands.get_skill_commands", return_value=fake_cmds),
@@ -828,7 +828,7 @@ class TestDiscordSkillCommands:
                 "skill_dir": f"{fake_skills_dir}/my-cool-skill",
             },
         }
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
         (tmp_path / "skills").mkdir(exist_ok=True)
         with (
             patch("agent.skill_commands.get_skill_commands", return_value=fake_cmds),
@@ -854,7 +854,7 @@ class TestDiscordSkillCommands:
             }
             for i in range(20)
         }
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
         (tmp_path / "skills").mkdir(exist_ok=True)
         with (
             patch("agent.skill_commands.get_skill_commands", return_value=fake_cmds),
@@ -878,7 +878,7 @@ class TestDiscordSkillCommands:
             "    discord:\n"
             "      - secret-skill\n"
         )
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
 
         fake_skills_dir = str(tmp_path / "skills")
         fake_cmds = {
@@ -921,7 +921,7 @@ class TestDiscordSkillCommands:
                 "skill_dir": f"{fake_skills_dir}/status",
             },
         }
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
         (tmp_path / "skills").mkdir(exist_ok=True)
         with (
             patch("agent.skill_commands.get_skill_commands", return_value=fake_cmds),
@@ -948,7 +948,7 @@ class TestDiscordSkillCommands:
                 "skill_dir": f"{fake_skills_dir}/verbose-skill",
             },
         }
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
         (tmp_path / "skills").mkdir(exist_ok=True)
         with (
             patch("agent.skill_commands.get_skill_commands", return_value=fake_cmds),
@@ -975,7 +975,7 @@ class TestDiscordSkillCommands:
                 "skill_dir": f"{fake_skills_dir}/{long_name}",
             },
         }
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("DREW_HOME", str(tmp_path))
         (tmp_path / "skills").mkdir(exist_ok=True)
         with (
             patch("agent.skill_commands.get_skill_commands", return_value=fake_cmds),

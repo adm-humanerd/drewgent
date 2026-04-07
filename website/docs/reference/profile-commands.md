@@ -4,15 +4,15 @@ sidebar_position: 7
 
 # Profile Commands Reference
 
-This page covers all commands related to [Hermes profiles](../user-guide/profiles.md). For general CLI commands, see [CLI Commands Reference](./cli-commands.md).
+This page covers all commands related to [Drewgent profiles](../user-guide/profiles.md). For general CLI commands, see [CLI Commands Reference](./cli-commands.md).
 
-## `hermes profile`
+## `drewgent` profile`
 
 ```bash
 hermes profile <subcommand>
 ```
 
-Top-level command for managing profiles. Running `hermes profile` without a subcommand shows help.
+Top-level command for managing profiles. Running `drewgent` profile` without a subcommand shows help.
 
 | Subcommand | Description |
 |------------|-------------|
@@ -26,7 +26,7 @@ Top-level command for managing profiles. Running `hermes profile` without a subc
 | `export` | Export a profile to a tar.gz archive. |
 | `import` | Import a profile from a tar.gz archive. |
 
-## `hermes profile list`
+## `drewgent` profile list`
 
 ```bash
 hermes profile list
@@ -46,13 +46,13 @@ $ hermes profile list
 
 No options.
 
-## `hermes profile use`
+## `drewgent` profile use`
 
 ```bash
 hermes profile use <name>
 ```
 
-Sets `<name>` as the active profile. All subsequent `hermes` commands (without `-p`) will use this profile.
+Sets `<name>` as the active profile. All subsequent `drewgent`` commands (without `-p`) will use this profile.
 
 | Argument | Description |
 |----------|-------------|
@@ -65,7 +65,7 @@ hermes profile use work
 hermes profile use default
 ```
 
-## `hermes profile create`
+## `drewgent` profile create`
 
 ```bash
 hermes profile create <name> [options]
@@ -96,7 +96,7 @@ hermes profile create backup --clone-all
 hermes profile create work2 --clone --clone-from work
 ```
 
-## `hermes profile delete`
+## `drewgent` profile delete`
 
 ```bash
 hermes profile delete <name> [options]
@@ -120,7 +120,7 @@ hermes profile delete mybot --yes
 This permanently deletes the profile's entire directory including all config, memories, sessions, and skills. Cannot delete the currently active profile.
 :::
 
-## `hermes profile show`
+## `drewgent` profile show`
 
 ```bash
 hermes profile show <name>
@@ -137,7 +137,7 @@ Displays details about a profile including its home directory, configured model,
 ```bash
 $ hermes profile show work
 Profile: work
-Path:    ~/.hermes/profiles/work
+Path:    ~/.drewgent/profiles/work
 Model:   anthropic/claude-sonnet-4 (anthropic)
 Gateway: stopped
 Skills:  12
@@ -146,13 +146,13 @@ SOUL.md: exists
 Alias:   ~/.local/bin/work
 ```
 
-## `hermes profile alias`
+## `drewgent` profile alias`
 
 ```bash
 hermes profile alias <name> [options]
 ```
 
-Regenerates the shell alias script at `~/.local/bin/<name>`. Useful if the alias was accidentally deleted or if you need to update it after moving your Hermes installation.
+Regenerates the shell alias script at `~/.local/bin/<name>`. Useful if the alias was accidentally deleted or if you need to update it after moving your Drewgent installation.
 
 | Argument / Option | Description |
 |-------------------|-------------|
@@ -173,7 +173,7 @@ hermes profile alias work --remove
 # Removes the wrapper script
 ```
 
-## `hermes profile rename`
+## `drewgent` profile rename`
 
 ```bash
 hermes profile rename <old-name> <new-name>
@@ -190,11 +190,11 @@ Renames a profile. Updates the directory and shell alias.
 
 ```bash
 hermes profile rename mybot assistant
-# ~/.hermes/profiles/mybot → ~/.hermes/profiles/assistant
+# ~/.drewgent/profiles/mybot → ~/.drewgent/profiles/assistant
 # ~/.local/bin/mybot → ~/.local/bin/assistant
 ```
 
-## `hermes profile export`
+## `drewgent` profile export`
 
 ```bash
 hermes profile export <name> [options]
@@ -216,7 +216,7 @@ hermes profile export work
 hermes profile export work -o ./work-2026-03-29.tar.gz
 ```
 
-## `hermes profile import`
+## `drewgent` profile import`
 
 ```bash
 hermes profile import <archive> [options]
@@ -238,14 +238,14 @@ hermes profile import ./work-2026-03-29.tar.gz
 hermes profile import ./work-2026-03-29.tar.gz --name work-restored
 ```
 
-## `hermes -p` / `hermes --profile`
+## `drewgent` -p` / `drewgent` --profile`
 
 ```bash
 hermes -p <name> <command> [options]
 hermes --profile <name> <command> [options]
 ```
 
-Global flag to run any Hermes command under a specific profile without changing the sticky default. This overrides the active profile for the duration of the command.
+Global flag to run any Drewgent command under a specific profile without changing the sticky default. This overrides the active profile for the duration of the command.
 
 | Option | Description |
 |--------|-------------|
@@ -260,7 +260,7 @@ hermes -p personal skills list
 hermes -p work config edit
 ```
 
-## `hermes completion`
+## `drewgent` completion`
 
 ```bash
 hermes completion <shell>
@@ -284,9 +284,9 @@ source ~/.bashrc
 ```
 
 After installation, tab completion works for:
-- `hermes profile <TAB>` — subcommands (list, use, create, etc.)
-- `hermes profile use <TAB>` — profile names
-- `hermes -p <TAB>` — profile names
+- `drewgent` profile <TAB>` — subcommands (list, use, create, etc.)
+- `drewgent` profile use <TAB>` — profile names
+- `drewgent` -p <TAB>` — profile names
 
 ## See also
 

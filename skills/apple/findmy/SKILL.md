@@ -2,11 +2,11 @@
 name: findmy
 description: Track Apple devices and AirTags via FindMy.app on macOS using AppleScript and screen capture.
 version: 1.0.0
-author: Hermes Agent
+author: Drewgent Agent
 license: MIT
 platforms: [macos]
 metadata:
-  hermes:
+  drewgent:
     tags: [FindMy, AirTag, location, tracking, macOS, Apple]
 ---
 

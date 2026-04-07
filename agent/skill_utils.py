@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from hermes_constants import get_hermes_home
+from drewgent_constants import get_drewgent_home
 
 logger = logging.getLogger(__name__)
 
@@ -123,14 +123,14 @@ def get_disabled_skill_names(platform: str | None = None) -> Set[str]:
 
     Args:
         platform: Explicit platform name (e.g. ``"telegram"``).  When
-            *None*, resolves from ``HERMES_PLATFORM`` or
-            ``HERMES_SESSION_PLATFORM`` env vars.  Falls back to the
+            *None*, resolves from ``DREW_PLATFORM`` or
+            ``DREW_SESSION_PLATFORM`` env vars.  Falls back to the
             global disabled list when no platform is determined.
 
     Reads the config file directly (no CLI config imports) to stay
     lightweight.
     """
-    config_path = get_hermes_home() / "config.yaml"
+    config_path = get_drewgent_home() / "config.yaml"
     if not config_path.exists():
         return set()
     try:
@@ -146,9 +146,7 @@ def get_disabled_skill_names(platform: str | None = None) -> Set[str]:
         return set()
 
     resolved_platform = (
-        platform
-        or os.getenv("HERMES_PLATFORM")
-        or os.getenv("HERMES_SESSION_PLATFORM")
+        platform or os.getenv("DREW_PLATFORM") or os.getenv("DREW_SESSION_PLATFORM")
     )
     if resolved_platform:
         platform_disabled = (skills_cfg.get("platform_disabled") or {}).get(
@@ -175,9 +173,9 @@ def get_external_skills_dirs() -> List[Path]:
 
     Each entry is expanded (``~`` and ``${VAR}``) and resolved to an absolute
     path.  Only directories that actually exist are returned.  Duplicates and
-    paths that resolve to the local ``~/.hermes/skills/`` are silently skipped.
+    paths that resolve to the local ``~/.drewgent/skills/`` are silently skipped.
     """
-    config_path = get_hermes_home() / "config.yaml"
+    config_path = get_drewgent_home() / "config.yaml"
     if not config_path.exists():
         return []
     try:
@@ -199,7 +197,7 @@ def get_external_skills_dirs() -> List[Path]:
     if not isinstance(raw_dirs, list):
         return []
 
-    local_skills = (get_hermes_home() / "skills").resolve()
+    local_skills = (get_drewgent_home() / "skills").resolve()
     seen: Set[Path] = set()
     result: List[Path] = []
 
@@ -224,12 +222,12 @@ def get_external_skills_dirs() -> List[Path]:
 
 
 def get_all_skills_dirs() -> List[Path]:
-    """Return all skill directories: local ``~/.hermes/skills/`` first, then external.
+    """Return all skill directories: local ``~/.drewgent/skills/`` first, then external.
 
     The local dir is always first (and always included even if it doesn't exist
     yet — callers handle that).  External dirs follow in config order.
     """
-    dirs = [get_hermes_home() / "skills"]
+    dirs = [get_drewgent_home() / "skills"]
     dirs.extend(get_external_skills_dirs())
     return dirs
 
@@ -243,14 +241,14 @@ def extract_skill_conditions(frontmatter: Dict[str, Any]) -> Dict[str, List]:
     # Handle cases where metadata is not a dict (e.g., a string from malformed YAML)
     if not isinstance(metadata, dict):
         metadata = {}
-    hermes = metadata.get("hermes") or {}
-    if not isinstance(hermes, dict):
-        hermes = {}
+    drewgent_meta = metadata.get("drewgent") or {}
+    if not isinstance(drewgent_meta, dict):
+        drewgent_meta = {}
     return {
-        "fallback_for_toolsets": hermes.get("fallback_for_toolsets", []),
-        "requires_toolsets": hermes.get("requires_toolsets", []),
-        "fallback_for_tools": hermes.get("fallback_for_tools", []),
-        "requires_tools": hermes.get("requires_tools", []),
+        "fallback_for_toolsets": drewgent_meta.get("fallback_for_toolsets", []),
+        "requires_toolsets": drewgent_meta.get("requires_toolsets", []),
+        "fallback_for_tools": drewgent_meta.get("fallback_for_tools", []),
+        "requires_tools": drewgent_meta.get("requires_tools", []),
     }
 
 
@@ -263,7 +261,7 @@ def extract_skill_config_vars(frontmatter: Dict[str, Any]) -> List[Dict[str, Any
     Skills declare config.yaml settings they need via::
 
         metadata:
-          hermes:
+          drewgent:
             config:
               - key: wiki.path
                 description: Path to the LLM Wiki knowledge base directory
@@ -276,10 +274,10 @@ def extract_skill_config_vars(frontmatter: Dict[str, Any]) -> List[Dict[str, Any
     metadata = frontmatter.get("metadata")
     if not isinstance(metadata, dict):
         return []
-    hermes = metadata.get("hermes")
-    if not isinstance(hermes, dict):
+    drewgent_meta = metadata.get("drewgent")
+    if not isinstance(drewgent_meta, dict):
         return []
-    raw = hermes.get("config")
+    raw = drewgent_meta.get("config")
     if not raw:
         return []
     if isinstance(raw, dict):
@@ -383,7 +381,7 @@ def resolve_skill_config_values(
     current values (or the declared default if the key isn't set).
     Path values are expanded via ``os.path.expanduser``.
     """
-    config_path = get_hermes_home() / "config.yaml"
+    config_path = get_drewgent_home() / "config.yaml"
     config: Dict[str, Any] = {}
     if config_path.exists():
         try:

@@ -316,7 +316,7 @@ Generate some audio.
         )
 
         with patch.dict(
-            os.environ, {"HERMES_SESSION_PLATFORM": "telegram"}, clear=False
+            os.environ, {"DREW_SESSION_PLATFORM": "telegram"}, clear=False
         ):
             with patch("tools.skills_tool.SKILLS_DIR", tmp_path):
                 _make_skill(
@@ -380,7 +380,7 @@ class TestPlanSkillHelpers:
             now=datetime(2026, 3, 15, 9, 30, 45),
         )
 
-        assert path == Path(".hermes") / "plans" / "2026-03-15_093045-implement-oauth-login-refresh-tokens.md"
+        assert path == Path(".drewgent") / "plans" / "2026-03-15_093045-implement-oauth-login-refresh-tokens.md"
 
     def test_plan_skill_message_can_include_runtime_save_path_note(self, tmp_path):
         with patch("tools.skills_tool.SKILLS_DIR", tmp_path):
@@ -400,7 +400,7 @@ class TestPlanSkillHelpers:
             )
 
         assert msg is not None
-        assert "Save plans under $HERMES_HOME/plans" not in msg
+        assert "Save plans under $DREW_HOME/plans" not in msg
         assert ".hermes/plans" in msg
         assert "Add a /plan command" in msg
         assert ".hermes/plans/plan.md" in msg

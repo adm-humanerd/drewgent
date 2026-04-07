@@ -12,14 +12,14 @@ AI-native cross-session user modeling with dialectic Q&A, semantic search, peer 
 ## Setup
 
 ```bash
-hermes honcho setup    # full interactive wizard (cloud or local)
-hermes memory setup    # generic picker, also works
+drewgent honcho setup    # full interactive wizard (cloud or local)
+drewgent memory setup    # generic picker, also works
 ```
 
 Or manually:
 ```bash
-hermes config set memory.provider honcho
-echo "HONCHO_API_KEY=your-key" >> ~/.hermes/.env
+drewgent config set memory.provider honcho
+echo "HONCHO_API_KEY=your-key" >> ~/.drewgent/.env
 ```
 
 ## Config Resolution
@@ -28,11 +28,11 @@ Config is read from the first file that exists:
 
 | Priority | Path | Scope |
 |----------|------|-------|
-| 1 | `$HERMES_HOME/honcho.json` | Profile-local (isolated Hermes instances) |
-| 2 | `~/.hermes/honcho.json` | Default profile (shared host blocks) |
+| 1 | `$HERMES_HOME/honcho.json` | Profile-local (isolated Drewgent instances) |
+| 2 | `~/.drewgent/honcho.json` | Default profile (shared host blocks) |
 | 3 | `~/.honcho/config.json` | Global (cross-app interop) |
 
-Host key is derived from the active Hermes profile: `hermes` (default) or `hermes.<profile>`.
+Host key is derived from the active Drewgent profile: `drewgent`` (default) or `drewgent`.<profile>`.
 
 ## Tools
 
@@ -93,7 +93,7 @@ Per-profile example -- coder profile observes the user but user doesn't observe 
 
 ```json
 "hosts": {
-  "hermes.coder": {
+  "drewgent.coder": {
     "observation": {
       "user": { "observeMe": true, "observeOthers": false },
       "ai":   { "observeMe": true, "observeOthers": true }
@@ -152,7 +152,7 @@ These are read from the root config object, not the host block. Must be set manu
 
 For every key, resolution order is: **host block > root > env var > default**.
 
-Host key derivation: `HERMES_HONCHO_HOST` env > active profile (`hermes.<profile>`) > `"hermes"`.
+Host key derivation: `HERMES_HONCHO_HOST` env > active profile (`drewgent`.<profile>`) > `"drewgent"`.
 
 ## Environment Variables
 
@@ -167,29 +167,29 @@ Host key derivation: `HERMES_HONCHO_HOST` env > active profile (`hermes.<profile
 
 | Command | Description |
 |---------|-------------|
-| `hermes honcho setup` | Full interactive setup wizard |
-| `hermes honcho status` | Show resolved config for active profile |
-| `hermes honcho enable` / `disable` | Toggle Honcho for active profile |
-| `hermes honcho mode <mode>` | Change recall or observation mode |
-| `hermes honcho peer --user <name>` | Update user peer name |
-| `hermes honcho peer --ai <name>` | Update AI peer name |
-| `hermes honcho tokens --context <N>` | Set context token budget |
-| `hermes honcho tokens --dialectic <N>` | Set dialectic max chars |
-| `hermes honcho map <name>` | Map current directory to a session name |
-| `hermes honcho sync` | Create host blocks for all Hermes profiles |
+| `drewgent` honcho setup` | Full interactive setup wizard |
+| `drewgent` honcho status` | Show resolved config for active profile |
+| `drewgent` honcho enable` / `disable` | Toggle Honcho for active profile |
+| `drewgent` honcho mode <mode>` | Change recall or observation mode |
+| `drewgent` honcho peer --user <name>` | Update user peer name |
+| `drewgent` honcho peer --ai <name>` | Update AI peer name |
+| `drewgent` honcho tokens --context <N>` | Set context token budget |
+| `drewgent` honcho tokens --dialectic <N>` | Set dialectic max chars |
+| `drewgent` honcho map <name>` | Map current directory to a session name |
+| `drewgent` honcho sync` | Create host blocks for all Drewgent profiles |
 
 ## Example Config
 
 ```json
 {
   "apiKey": "your-key",
-  "workspace": "hermes",
+  "workspace": "drewgent",
   "peerName": "eri",
   "hosts": {
-    "hermes": {
+    "drewgent": {
       "enabled": true,
-      "aiPeer": "hermes",
-      "workspace": "hermes",
+      "aiPeer": "drewgent",
+      "workspace": "drewgent",
       "peerName": "eri",
       "recallMode": "hybrid",
       "observation": {
@@ -199,13 +199,13 @@ Host key derivation: `HERMES_HONCHO_HOST` env > active profile (`hermes.<profile
       "writeFrequency": "async",
       "sessionStrategy": "per-directory",
       "dialecticReasoningLevel": "low",
-      "dialecticMaxChars": 600,
+      "drewgentMaxChars": 600,
       "saveMessages": true
     },
-    "hermes.coder": {
+    "drewgent.coder": {
       "enabled": true,
       "aiPeer": "coder",
-      "workspace": "hermes",
+      "workspace": "drewgent",
       "peerName": "eri",
       "observation": {
         "user": { "observeMe": true, "observeOthers": false },

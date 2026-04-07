@@ -17,13 +17,13 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from hermes_constants import get_hermes_home
+from drewgent_constants import get_drewgent_home
 from tools.environments.base import BaseEnvironment
 from tools.interrupt import is_interrupted
 
 logger = logging.getLogger(__name__)
 
-_SNAPSHOT_STORE = get_hermes_home() / "singularity_snapshots.json"
+_SNAPSHOT_STORE = get_drewgent_home() / "singularity_snapshots.json"
 
 
 def _find_singularity_executable() -> str:
@@ -102,7 +102,7 @@ def _get_scratch_dir() -> Path:
       1. TERMINAL_SCRATCH_DIR (explicit override)
       2. TERMINAL_SANDBOX_DIR / singularity (shared sandbox root)
       3. /scratch (common on HPC clusters)
-      4. ~/.hermes/sandboxes/singularity (fallback)
+      4. ~/.drewgent/sandboxes/singularity (fallback)
     """
     custom_scratch = os.getenv("TERMINAL_SCRATCH_DIR")
     if custom_scratch:
@@ -115,7 +115,7 @@ def _get_scratch_dir() -> Path:
 
     scratch = Path("/scratch")
     if scratch.exists() and os.access(scratch, os.W_OK):
-        user_scratch = scratch / os.getenv("USER", "hermes") / "hermes-agent"
+        user_scratch = scratch / os.getenv("USER", "drewgent") / "drewgent-agent"
         user_scratch.mkdir(parents=True, exist_ok=True)
         logger.info("Using /scratch for sandboxes: %s", user_scratch)
         return user_scratch
@@ -223,7 +223,7 @@ class SingularityEnvironment(BaseEnvironment):
         super().__init__(cwd=cwd, timeout=timeout)
         self.executable = _ensure_singularity_available()
         self.image = _get_or_build_sif(image, self.executable)
-        self.instance_id = f"hermes_{uuid.uuid4().hex[:12]}"
+        self.instance_id = f"drewgent_{uuid.uuid4().hex[:12]}"
         self._instance_started = False
         self._persistent = persistent_filesystem
         self._task_id = task_id
@@ -235,7 +235,7 @@ class SingularityEnvironment(BaseEnvironment):
 
         # Persistent overlay directory
         if self._persistent:
-            overlay_base = _get_scratch_dir() / "hermes-overlays"
+            overlay_base = _get_scratch_dir() / "drewgent-overlays"
             overlay_base.mkdir(parents=True, exist_ok=True)
             self._overlay_dir = overlay_base / f"overlay-{task_id}"
             self._overlay_dir.mkdir(parents=True, exist_ok=True)

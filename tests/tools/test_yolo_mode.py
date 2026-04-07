@@ -30,9 +30,9 @@ class TestYoloMode:
     def test_dangerous_command_blocked_normally(self, monkeypatch):
         """Without yolo mode, dangerous commands in interactive mode require approval."""
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        monkeypatch.setenv("HERMES_SESSION_KEY", "test-session")
+        monkeypatch.setenv("DREW_SESSION_KEY", "test-session")
         monkeypatch.delenv("HERMES_YOLO_MODE", raising=False)
-        monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
+        monkeypatch.delenv("DREW_GATEWAY_SESSION", raising=False)
         monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
 
         # Verify the command IS detected as dangerous
@@ -49,7 +49,7 @@ class TestYoloMode:
         """With HERMES_YOLO_MODE, dangerous commands are auto-approved."""
         monkeypatch.setenv("HERMES_YOLO_MODE", "1")
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        monkeypatch.setenv("HERMES_SESSION_KEY", "test-session")
+        monkeypatch.setenv("DREW_SESSION_KEY", "test-session")
 
         result = check_dangerous_command("rm -rf /", "local")
         assert result["approved"]
@@ -101,7 +101,7 @@ class TestYoloMode:
         """Empty string for HERMES_YOLO_MODE should not trigger bypass."""
         monkeypatch.setenv("HERMES_YOLO_MODE", "")
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        monkeypatch.setenv("HERMES_SESSION_KEY", "test-session")
+        monkeypatch.setenv("DREW_SESSION_KEY", "test-session")
 
         # Empty string is falsy in Python, so getenv("HERMES_YOLO_MODE") returns ""
         # which is falsy — bypass should NOT activate

@@ -1,8 +1,8 @@
 ---
 name: google-workspace
-description: Gmail, Calendar, Drive, Contacts, Sheets, and Docs integration via Python. Uses OAuth2 with automatic token refresh. No external binaries needed — runs entirely with Google's Python client libraries in the Hermes venv.
+description: Gmail, Calendar, Drive, Contacts, Sheets, and Docs integration via Python. Uses OAuth2 with automatic token refresh. No external binaries needed — runs entirely with Google's Python client libraries in the Drewgent venv.
 version: 1.0.0
-author: Nous Research
+author: HUMANERD
 license: MIT
 required_credential_files:
   - path: google_token.json
@@ -10,9 +10,9 @@ required_credential_files:
   - path: google_client_secret.json
     description: Google OAuth2 client credentials (downloaded from Google Cloud Console)
 metadata:
-  hermes:
+  drewgent:
     tags: [Google, Gmail, Calendar, Drive, Sheets, Docs, Contacts, Email, OAuth]
-    homepage: https://github.com/NousResearch/hermes-agent
+    homepage: https://github.com/NousResearch/drewgent-agent
     related_skills: [himalaya]
 ---
 
@@ -37,11 +37,11 @@ on CLI, Telegram, Discord, or any platform.
 Define a shorthand first:
 
 ```bash
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-GWORKSPACE_SKILL_DIR="$HERMES_HOME/skills/productivity/google-workspace"
+DREW_HOME="${DREW_HOME:-$HOME/.hermes}"
+GWORKSPACE_SKILL_DIR="$DREW_HOME/skills/productivity/google-workspace"
 PYTHON_BIN="${HERMES_PYTHON:-python3}"
-if [ -x "$HERMES_HOME/hermes-agent/venv/bin/python" ]; then
-  PYTHON_BIN="$HERMES_HOME/hermes-agent/venv/bin/python"
+if [ -x "$DREW_HOME/drewgent-agent/venv/bin/python" ]; then
+  PYTHON_BIN="$DREW_HOME/drewgent-agent/venv/bin/python"
 fi
 GSETUP="$PYTHON_BIN $GWORKSPACE_SKILL_DIR/scripts/setup.py"
 ```
@@ -131,9 +131,9 @@ Should print `AUTHENTICATED`. Setup is complete — token refreshes automaticall
 
 ### Notes
 
-- Token is stored at `google_token.json` under the active profile's `HERMES_HOME` and auto-refreshes.
-- Pending OAuth session state/verifier are stored temporarily at `google_oauth_pending.json` under the active profile's `HERMES_HOME` until exchange completes.
-- Hermes now refuses to overwrite a full Google Workspace token with a narrower re-auth token missing Gmail scopes, so one profile's partial consent cannot silently break email actions later.
+- Token is stored at `google_token.json` under the active profile's `DREW_HOME` and auto-refreshes.
+- Pending OAuth session state/verifier are stored temporarily at `google_oauth_pending.json` under the active profile's `DREW_HOME` until exchange completes.
+- Drewgent now refuses to overwrite a full Google Workspace token with a narrower re-auth token missing Gmail scopes, so one profile's partial consent cannot silently break email actions later.
 - To revoke: `$GSETUP --revoke`
 
 ## Usage
@@ -141,11 +141,11 @@ Should print `AUTHENTICATED`. Setup is complete — token refreshes automaticall
 All commands go through the API script. Set `GAPI` as a shorthand:
 
 ```bash
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-GWORKSPACE_SKILL_DIR="$HERMES_HOME/skills/productivity/google-workspace"
+DREW_HOME="${DREW_HOME:-$HOME/.hermes}"
+GWORKSPACE_SKILL_DIR="$DREW_HOME/skills/productivity/google-workspace"
 PYTHON_BIN="${HERMES_PYTHON:-python3}"
-if [ -x "$HERMES_HOME/hermes-agent/venv/bin/python" ]; then
-  PYTHON_BIN="$HERMES_HOME/hermes-agent/venv/bin/python"
+if [ -x "$DREW_HOME/drewgent-agent/venv/bin/python" ]; then
+  PYTHON_BIN="$DREW_HOME/drewgent-agent/venv/bin/python"
 fi
 GAPI="$PYTHON_BIN $GWORKSPACE_SKILL_DIR/scripts/google_api.py"
 ```

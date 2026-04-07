@@ -394,14 +394,14 @@ class TestBlockingApprovalE2E:
 
             token = set_current_session_key(session_key)
             os.environ["HERMES_EXEC_ASK"] = "1"
-            os.environ["HERMES_SESSION_KEY"] = session_key
+            os.environ["DREW_SESSION_KEY"] = session_key
             try:
                 result_holder[0] = check_all_command_guards(
                     "rm -rf /important", "local"
                 )
             finally:
                 os.environ.pop("HERMES_EXEC_ASK", None)
-                os.environ.pop("HERMES_SESSION_KEY", None)
+                os.environ.pop("DREW_SESSION_KEY", None)
                 reset_current_session_key(token)
 
         t = threading.Thread(target=agent_thread)
@@ -440,14 +440,14 @@ class TestBlockingApprovalE2E:
 
             token = set_current_session_key(session_key)
             os.environ["HERMES_EXEC_ASK"] = "1"
-            os.environ["HERMES_SESSION_KEY"] = session_key
+            os.environ["DREW_SESSION_KEY"] = session_key
             try:
                 result_holder[0] = check_all_command_guards(
                     "rm -rf /important", "local"
                 )
             finally:
                 os.environ.pop("HERMES_EXEC_ASK", None)
-                os.environ.pop("HERMES_SESSION_KEY", None)
+                os.environ.pop("DREW_SESSION_KEY", None)
                 reset_current_session_key(token)
 
         t = threading.Thread(target=agent_thread)
@@ -481,7 +481,7 @@ class TestBlockingApprovalE2E:
 
             token = set_current_session_key(session_key)
             os.environ["HERMES_EXEC_ASK"] = "1"
-            os.environ["HERMES_SESSION_KEY"] = session_key
+            os.environ["DREW_SESSION_KEY"] = session_key
             try:
                 with patch("tools.approval._get_approval_config",
                            return_value={"gateway_timeout": 1}):
@@ -490,7 +490,7 @@ class TestBlockingApprovalE2E:
                     )
             finally:
                 os.environ.pop("HERMES_EXEC_ASK", None)
-                os.environ.pop("HERMES_SESSION_KEY", None)
+                os.environ.pop("DREW_SESSION_KEY", None)
                 reset_current_session_key(token)
 
         t = threading.Thread(target=agent_thread)
@@ -521,12 +521,12 @@ class TestBlockingApprovalE2E:
 
                 token = set_current_session_key(session_key)
                 os.environ["HERMES_EXEC_ASK"] = "1"
-                os.environ["HERMES_SESSION_KEY"] = session_key
+                os.environ["DREW_SESSION_KEY"] = session_key
                 try:
                     results[idx] = check_all_command_guards(cmd, "local")
                 finally:
                     os.environ.pop("HERMES_EXEC_ASK", None)
-                    os.environ.pop("HERMES_SESSION_KEY", None)
+                    os.environ.pop("DREW_SESSION_KEY", None)
                     reset_current_session_key(token)
             return run
 
@@ -576,12 +576,12 @@ class TestBlockingApprovalE2E:
 
                 token = set_current_session_key(session_key)
                 os.environ["HERMES_EXEC_ASK"] = "1"
-                os.environ["HERMES_SESSION_KEY"] = session_key
+                os.environ["DREW_SESSION_KEY"] = session_key
                 try:
                     results[idx] = check_all_command_guards(cmd, "local")
                 finally:
                     os.environ.pop("HERMES_EXEC_ASK", None)
-                    os.environ.pop("HERMES_SESSION_KEY", None)
+                    os.environ.pop("DREW_SESSION_KEY", None)
                     reset_current_session_key(token)
             return run
 
@@ -630,12 +630,12 @@ class TestFallbackNoCallback:
         from tools.approval import check_all_command_guards, _pending
 
         os.environ["HERMES_EXEC_ASK"] = "1"
-        os.environ["HERMES_SESSION_KEY"] = "no-callback-test"
+        os.environ["DREW_SESSION_KEY"] = "no-callback-test"
         try:
             result = check_all_command_guards("rm -rf /important", "local")
         finally:
             os.environ.pop("HERMES_EXEC_ASK", None)
-            os.environ.pop("HERMES_SESSION_KEY", None)
+            os.environ.pop("DREW_SESSION_KEY", None)
 
         assert result["approved"] is False
         assert result.get("status") == "approval_required"

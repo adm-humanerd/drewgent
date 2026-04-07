@@ -1,14 +1,14 @@
 #!/bin/bash
-# Docker entrypoint: bootstrap config files into the mounted volume, then run hermes.
+# Docker entrypoint: bootstrap config files into the mounted volume, then run drewgent.
 set -e
 
 HERMES_HOME="/opt/data"
-INSTALL_DIR="/opt/hermes"
+INSTALL_DIR="/opt/drewgent"
 
 # Create essential directory structure.  Cache and platform directories
 # (cache/images, cache/audio, platforms/whatsapp, etc.) are created on
 # demand by the application — don't pre-create them here so new installs
-# get the consolidated layout from get_hermes_dir().
+# get the consolidated layout from get_drewgent_dir().
 mkdir -p "$HERMES_HOME"/{cron,sessions,logs,hooks,memories,skills}
 
 # .env
@@ -31,4 +31,4 @@ if [ -d "$INSTALL_DIR/skills" ]; then
     python3 "$INSTALL_DIR/tools/skills_sync.py"
 fi
 
-exec hermes "$@"
+exec drewgent "$@"

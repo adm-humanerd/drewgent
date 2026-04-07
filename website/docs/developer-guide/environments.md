@@ -1,12 +1,12 @@
 ---
 sidebar_position: 5
 title: "Environments, Benchmarks & Data Generation"
-description: "Building RL training environments, running evaluation benchmarks, and generating SFT data with the Hermes-Agent Atropos integration"
+description: "Building RL training environments, running evaluation benchmarks, and generating SFT data with the Drewgent-Agent Atropos integration"
 ---
 
 # Environments, Benchmarks & Data Generation
 
-Hermes Agent includes a full environment framework that connects its tool-calling capabilities to the [Atropos](https://github.com/NousResearch/atropos) RL training framework. This enables three workflows:
+Drewgent Agent includes a full environment framework that connects its tool-calling capabilities to the [Atropos](https://github.com/NousResearch/atropos) RL training framework. This enables three workflows:
 
 1. **RL Training** — Train language models on multi-turn agentic tasks with GRPO
 2. **Benchmarks** — Evaluate models on standardised agentic benchmarks
@@ -15,7 +15,7 @@ Hermes Agent includes a full environment framework that connects its tool-callin
 All three share the same core: an **environment** class that defines tasks, runs an agent loop, and scores the output.
 
 :::info Repo environments vs RL training tools
-The Python environment framework documented here lives under the repo's `environments/` directory and is the implementation-level API for Hermes/Atropos integration. This is separate from the user-facing `rl_*` tools, which operate as an orchestration surface for remote RL training workflows.
+The Python environment framework documented here lives under the repo's `environments/` directory and is the implementation-level API for Drewgent/Atropos integration. This is separate from the user-facing `rl_*` tools, which operate as an orchestration surface for remote RL training workflows.
 :::
 
 :::tip Quick Links
@@ -37,7 +37,7 @@ classDiagram
       CLI: serve / process / evaluate
     }
 
-    class HermesAgentBaseEnv {
+    class DrewgentAgentBaseEnv {
       Terminal backend configuration
       Tool resolution
       Agent loop engine
@@ -48,7 +48,7 @@ classDiagram
       Stack testing
     }
 
-    class HermesSweEnv {
+    class DrewgentSweEnv {
       SWE training
     }
 
@@ -64,10 +64,10 @@ classDiagram
       Long-horizon benchmark
     }
 
-    BaseEnv <|-- HermesAgentBaseEnv
-    HermesAgentBaseEnv <|-- TerminalTestEnv
-    HermesAgentBaseEnv <|-- HermesSweEnv
-    HermesAgentBaseEnv <|-- TerminalBench2EvalEnv
+    BaseEnv <|-- DrewgentAgentBaseEnv
+    DrewgentAgentBaseEnv <|-- TerminalTestEnv
+    DrewgentAgentBaseEnv <|-- DrewgentSweEnv
+    DrewgentAgentBaseEnv <|-- TerminalBench2EvalEnv
     TerminalBench2EvalEnv <|-- TBLiteEvalEnv
     TerminalBench2EvalEnv <|-- YCBenchEvalEnv
 ```
@@ -81,18 +81,18 @@ The foundation from `atroposlib`. Provides:
 - **CLI interface** — three subcommands: `serve`, `process`, `evaluate`
 - **Eval logging** — `evaluate_log()` saves results to JSON + JSONL
 
-### HermesAgentBaseEnv
+### DrewgentAgentBaseEnv
 
-The hermes-agent layer (`environments/hermes_base_env.py`). Adds:
+The drewgent-agent layer (`environments/drewgent_base_env.py`). Adds:
 - **Terminal backend configuration** — sets `TERMINAL_ENV` for sandboxed execution (local, Docker, Modal, Daytona, SSH, Singularity)
-- **Tool resolution** — `_resolve_tools_for_group()` calls hermes-agent's `get_tool_definitions()` to get the right tool schemas based on enabled/disabled toolsets
-- **Agent loop integration** — `collect_trajectory()` runs `HermesAgentLoop` and scores the result
+- **Tool resolution** — `_resolve_tools_for_group()` calls drewgent-agent's `get_tool_definitions()` to get the right tool schemas based on enabled/disabled toolsets
+- **Agent loop integration** — `collect_trajectory()` runs `DrewgentAgentLoop` and scores the result
 - **Two-phase operation** — Phase 1 (OpenAI server) for eval/SFT, Phase 2 (VLLM ManagedServer) for full RL with logprobs
 - **Async safety patches** — monkey-patches Modal backend to work inside Atropos's event loop
 
 ### Concrete Environments
 
-Your environment inherits from `HermesAgentBaseEnv` and implements five methods:
+Your environment inherits from `DrewgentAgentBaseEnv` and implements five methods:
 
 | Method | Purpose |
 |--------|---------|
@@ -106,7 +106,7 @@ Your environment inherits from `HermesAgentBaseEnv` and implements five methods:
 
 ### Agent Loop
 
-`HermesAgentLoop` (`environments/agent_loop.py`) is the reusable multi-turn agent engine. It runs the same tool-calling pattern as hermes-agent's main loop:
+`DrewgentAgentLoop` (`environments/agent_loop.py`) is the reusable multi-turn agent engine. It runs the same tool-calling pattern as drewgent-agent's main loop:
 
 1. Send messages + tool schemas to the API via `server.chat_completion()`
 2. If the response contains `tool_calls`, dispatch each via `handle_function_call()`
@@ -158,7 +158,7 @@ Available methods:
 | **Transfers** | `upload_file()`, `upload_dir()`, `download_file()`, `download_dir()` |
 | **Web** | `web_search(query)`, `web_extract(urls)` |
 | **Browser** | `browser_navigate(url)`, `browser_snapshot()` |
-| **Generic** | `call_tool(name, args)` — escape hatch for any hermes-agent tool |
+| **Generic** | `call_tool(name, args)` — escape hatch for any drewgent-agent tool |
 | **Cleanup** | `cleanup()` — release all resources |
 
 ### Tool Call Parsers
@@ -168,11 +168,11 @@ For **Phase 2** (VLLM ManagedServer), the server returns raw text without struct
 ```python
 from environments.tool_call_parsers import get_parser
 
-parser = get_parser("hermes")  # or "mistral", "llama3_json", "qwen", "deepseek_v3", etc.
+parser = get_parser("drewgent")  # or "mistral", "llama3_json", "qwen", "deepseek_v3", etc.
 content, tool_calls = parser.parse(raw_model_output)
 ```
 
-Available parsers: `hermes`, `mistral`, `llama3_json`, `qwen`, `qwen3_coder`, `deepseek_v3`, `deepseek_v3_1`, `kimi_k2`, `longcat`, `glm45`, `glm47`.
+Available parsers: `drewgent``, `mistral`, `llama3_json`, `qwen`, `qwen3_coder`, `deepseek_v3`, `deepseek_v3_1`, `kimi_k2`, `longcat`, `glm45`, `glm47`.
 
 In Phase 1 (OpenAI server type), parsers are not needed — the server handles tool call parsing natively.
 
@@ -241,7 +241,7 @@ TBLite is a thin subclass of TerminalBench2 — only the dataset and timeouts di
 
 ```bash
 # Install yc-bench (optional dependency)
-pip install "hermes-agent[yc-bench]"
+pip install "drewgent-agent[yc-bench]"
 
 # Run evaluation
 bash environments/benchmarks/yc_bench/run_eval.sh
@@ -273,12 +273,12 @@ python environments/terminal_test_env/terminal_test_env.py process \
 python environments/terminal_test_env/terminal_test_env.py serve
 ```
 
-### HermesSweEnv
+### DrewgentSweEnv
 
 SWE-bench style training environment. The model gets a coding task, uses terminal + file + web tools to solve it, and the reward function runs tests in the same Modal sandbox.
 
 ```bash
-python environments/hermes_swe_env/hermes_swe_env.py serve \
+python environments/drewgent_swe_env/drewgent_swe_env.py serve \
     --openai.model_name YourModel \
     --env.dataset_name bigcode/humanevalpack \
     --env.terminal_backend modal
@@ -321,7 +321,7 @@ Connects the environment to a running Atropos API server (`run-api`). Used durin
 run-api
 
 # Terminal 2: Start the environment
-python environments/hermes_swe_env/hermes_swe_env.py serve \
+python environments/drewgent_swe_env/drewgent_swe_env.py serve \
     --openai.model_name YourModel
 ```
 
@@ -349,13 +349,13 @@ Uses ManagedServer for exact token IDs + logprobs via `/generate`. A client-side
 ### Training Environment
 
 ```python
-from environments.hermes_base_env import HermesAgentBaseEnv, HermesAgentEnvConfig
+from environments.drewgent_base_env import DrewgentAgentBaseEnv, DrewgentAgentEnvConfig
 from atroposlib.envs.server_handling.server_manager import APIServerConfig
 
-class MyEnvConfig(HermesAgentEnvConfig):
+class MyEnvConfig(DrewgentAgentEnvConfig):
     my_custom_field: str = "default_value"
 
-class MyEnv(HermesAgentBaseEnv):
+class MyEnv(DrewgentAgentBaseEnv):
     name = "my-env"
     env_config_cls = MyEnvConfig
 
@@ -416,11 +416,11 @@ See `environments/benchmarks/yc_bench/yc_bench_env.py` for a clean, well-documen
 
 ## Configuration Reference
 
-### HermesAgentEnvConfig Fields
+### DrewgentAgentEnvConfig Fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled_toolsets` | `List[str]` | `None` (all) | Which hermes toolsets to enable |
+| `enabled_toolsets` | `List[str]` | `None` (all) | Which drewgent toolsets to enable |
 | `disabled_toolsets` | `List[str]` | `None` | Toolsets to filter out |
 | `distribution` | `str` | `None` | Probabilistic toolset distribution name |
 | `max_agent_turns` | `int` | `30` | Max LLM calls per rollout |
@@ -448,7 +448,7 @@ env:
   terminal_backend: "modal"
   terminal_timeout: 300
   dataset_name: "NousResearch/terminal-bench-2"
-  tokenizer_name: "NousResearch/Hermes-3-Llama-3.1-8B"
+  tokenizer_name: "NousResearch/Drewgent-3-Llama-3.1-8B"
   use_wandb: true
   wandb_name: "my-benchmark"
 
@@ -477,12 +477,12 @@ python my_env.py evaluate \
 
 ### For Modal-sandboxed benchmarks (TB2, TBLite)
 
-- [Modal](https://modal.com) account and CLI: `pip install "hermes-agent[modal]"`
+- [Modal](https://modal.com) account and CLI: `pip install "drewgent-agent[modal]"`
 - `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` environment variables
 
 ### For YC-Bench
 
-- `pip install "hermes-agent[yc-bench]"` (installs the yc-bench CLI + SQLAlchemy)
+- `pip install "drewgent-agent[yc-bench]"` (installs the yc-bench CLI + SQLAlchemy)
 - No Modal needed — runs with local terminal backend
 
 ### For RL training
@@ -497,13 +497,13 @@ See [RL Training](/user-guide/features/rl-training) for the agent-driven RL work
 
 ```
 environments/
-├── hermes_base_env.py          # Abstract base class (HermesAgentBaseEnv)
-├── agent_loop.py               # Multi-turn agent engine (HermesAgentLoop)
+├── drewgent_base_env.py          # Abstract base class (DrewgentAgentBaseEnv)
+├── agent_loop.py               # Multi-turn agent engine (DrewgentAgentLoop)
 ├── tool_context.py             # Per-rollout tool access for reward functions
 ├── patches.py                  # Async-safety patches for Modal backend
 │
 ├── tool_call_parsers/          # Phase 2 client-side parsers
-│   ├── hermes_parser.py        # Hermes/ChatML <tool_call> format
+│   ├── drewgent_parser.py        # Drewgent/ChatML <tool_call> format
 │   ├── mistral_parser.py       # Mistral [TOOL_CALLS] format
 │   ├── llama_parser.py         # Llama 3 JSON tool calling
 │   ├── qwen_parser.py          # Qwen format
@@ -511,7 +511,7 @@ environments/
 │   └── ...                     # + kimi_k2, longcat, glm45/47, etc.
 │
 ├── terminal_test_env/          # Stack validation (inline tasks)
-├── hermes_swe_env/             # SWE-bench training environment
+├── drewgent_swe_env/             # SWE-bench training environment
 │
 └── benchmarks/                 # Evaluation benchmarks
     ├── terminalbench_2/        # 89 terminal tasks, Modal sandboxes

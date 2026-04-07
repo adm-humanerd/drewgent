@@ -1,7 +1,7 @@
 ---
 sidebar_position: 4
 title: "Toolsets Reference"
-description: "Reference for Hermes core, composite, platform, and dynamic toolsets"
+description: "Reference for Drewgent core, composite, platform, and dynamic toolsets"
 ---
 
 # Toolsets Reference
@@ -14,7 +14,7 @@ Every tool belongs to exactly one toolset. When you enable a toolset, all tools 
 
 - **Core** — A single logical group of related tools (e.g., `file` bundles `read_file`, `write_file`, `patch`, `search_files`)
 - **Composite** — Combines multiple core toolsets for a common scenario (e.g., `debugging` bundles file, terminal, and web tools)
-- **Platform** — A complete tool configuration for a specific deployment context (e.g., `hermes-cli` is the default for interactive CLI sessions)
+- **Platform** — A complete tool configuration for a specific deployment context (e.g., `drewgent-cli` is the default for interactive CLI sessions)
 
 ## Configuring Toolsets
 
@@ -30,8 +30,8 @@ hermes chat --toolsets all              # everything
 
 ```yaml
 toolsets:
-  - hermes-cli          # default for CLI
-  # - hermes-telegram   # override for Telegram gateway
+  - drewgent-cli          # default for CLI
+  # - drewgent-telegram   # override for Telegram gateway
 ```
 
 ### Interactive management
@@ -54,7 +54,7 @@ Or in-session:
 |---------|-------|---------|
 | `browser` | `browser_back`, `browser_click`, `browser_console`, `browser_get_images`, `browser_navigate`, `browser_press`, `browser_scroll`, `browser_snapshot`, `browser_type`, `browser_vision`, `web_search` | Full browser automation. Includes `web_search` as a fallback for quick lookups. |
 | `clarify` | `clarify` | Ask the user a question when the agent needs clarification. |
-| `code_execution` | `execute_code` | Run Python scripts that call Hermes tools programmatically. |
+| `code_execution` | `execute_code` | Run Python scripts that call Drewgent tools programmatically. |
 | `cronjob` | `cronjob` | Schedule and manage recurring tasks. |
 | `delegation` | `delegate_task` | Spawn isolated subagent instances for parallel work. |
 | `file` | `patch`, `read_file`, `search_files`, `write_file` | File reading, writing, searching, and editing. |
@@ -84,28 +84,28 @@ These expand to multiple core toolsets, providing a convenient shorthand for com
 
 ## Platform Toolsets
 
-Platform toolsets define the complete tool configuration for a deployment target. Most messaging platforms use the same set as `hermes-cli`:
+Platform toolsets define the complete tool configuration for a deployment target. Most messaging platforms use the same set as `drewgent-cli`:
 
-| Toolset | Differences from `hermes-cli` |
+| Toolset | Differences from `drewgent-cli` |
 |---------|-------------------------------|
-| `hermes-cli` | Full toolset — all 39 tools including `clarify`. The default for interactive CLI sessions. |
-| `hermes-acp` | Drops `clarify`, `cronjob`, `image_generate`, `mixture_of_agents`, `send_message`, `text_to_speech`, homeassistant tools. Focused on coding tasks in IDE context. |
-| `hermes-api-server` | Drops `clarify` and `send_message`. Adds everything else — suitable for programmatic access where user interaction isn't possible. |
-| `hermes-telegram` | Same as `hermes-cli`. |
-| `hermes-discord` | Same as `hermes-cli`. |
-| `hermes-slack` | Same as `hermes-cli`. |
-| `hermes-whatsapp` | Same as `hermes-cli`. |
-| `hermes-signal` | Same as `hermes-cli`. |
-| `hermes-matrix` | Same as `hermes-cli`. |
-| `hermes-mattermost` | Same as `hermes-cli`. |
-| `hermes-email` | Same as `hermes-cli`. |
-| `hermes-sms` | Same as `hermes-cli`. |
-| `hermes-dingtalk` | Same as `hermes-cli`. |
-| `hermes-feishu` | Same as `hermes-cli`. |
-| `hermes-wecom` | Same as `hermes-cli`. |
-| `hermes-homeassistant` | Same as `hermes-cli`. |
-| `hermes-webhook` | Same as `hermes-cli`. |
-| `hermes-gateway` | Union of all messaging platform toolsets. Used internally when the gateway needs the broadest possible tool set. |
+| `drewgent-cli` | Full toolset — all 39 tools including `clarify`. The default for interactive CLI sessions. |
+| `drewgent-acp` | Drops `clarify`, `cronjob`, `image_generate`, `mixture_of_agents`, `send_message`, `text_to_speech`, homeassistant tools. Focused on coding tasks in IDE context. |
+| `drewgent-api-server` | Drops `clarify` and `send_message`. Adds everything else — suitable for programmatic access where user interaction isn't possible. |
+| `drewgent-telegram` | Same as `drewgent-cli`. |
+| `drewgent-discord` | Same as `drewgent-cli`. |
+| `drewgent-slack` | Same as `drewgent-cli`. |
+| `drewgent-whatsapp` | Same as `drewgent-cli`. |
+| `drewgent-signal` | Same as `drewgent-cli`. |
+| `drewgent-matrix` | Same as `drewgent-cli`. |
+| `drewgent-mattermost` | Same as `drewgent-cli`. |
+| `drewgent-email` | Same as `drewgent-cli`. |
+| `drewgent-sms` | Same as `drewgent-cli`. |
+| `drewgent-dingtalk` | Same as `drewgent-cli`. |
+| `drewgent-feishu` | Same as `drewgent-cli`. |
+| `drewgent-wecom` | Same as `drewgent-cli`. |
+| `drewgent-homeassistant` | Same as `drewgent-cli`. |
+| `drewgent-webhook` | Same as `drewgent-cli`. |
+| `drewgent-gateway` | Union of all messaging platform toolsets. Used internally when the gateway needs the broadest possible tool set. |
 
 ## Dynamic Toolsets
 
@@ -134,7 +134,7 @@ Define custom toolsets in `config.yaml` to create project-specific bundles:
 
 ```yaml
 toolsets:
-  - hermes-cli
+  - drewgent-cli
 custom_toolsets:
   data-science:
     - file
@@ -148,8 +148,8 @@ custom_toolsets:
 
 - `all` or `*` — expands to every registered toolset (built-in + dynamic + plugin)
 
-## Relationship to `hermes tools`
+## Relationship to `drewgent` tools`
 
-The `hermes tools` command provides a curses-based UI for toggling individual tools on or off per platform. This operates at the tool level (finer than toolsets) and persists to `config.yaml`. Disabled tools are filtered out even if their toolset is enabled.
+The `drewgent` tools` command provides a curses-based UI for toggling individual tools on or off per platform. This operates at the tool level (finer than toolsets) and persists to `config.yaml`. Disabled tools are filtered out even if their toolset is enabled.
 
 See also: [Tools Reference](./tools-reference.md) for the complete list of individual tools and their parameters.

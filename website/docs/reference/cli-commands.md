@@ -1,7 +1,7 @@
 ---
 sidebar_position: 1
 title: "CLI Commands Reference"
-description: "Authoritative reference for Hermes terminal commands and command families"
+description: "Authoritative reference for Drewgent terminal commands and command families"
 ---
 
 # CLI Commands Reference
@@ -21,7 +21,7 @@ hermes [global-options] <command> [subcommand/options]
 | Option | Description |
 |--------|-------------|
 | `--version`, `-V` | Show version and exit. |
-| `--profile <name>`, `-p <name>` | Select which Hermes profile to use for this invocation. Overrides the sticky default set by `hermes profile use`. |
+| `--profile <name>`, `-p <name>` | Select which Drewgent profile to use for this invocation. Overrides the sticky default set by `drewgent` profile use`. |
 | `--resume <session>`, `-r <session>` | Resume a previous session by ID or title. |
 | `--continue [name]`, `-c [name]` | Resume the most recent session, or the most recent session matching a title. |
 | `--worktree`, `-w` | Start in an isolated git worktree for parallel-agent workflows. |
@@ -32,36 +32,36 @@ hermes [global-options] <command> [subcommand/options]
 
 | Command | Purpose |
 |---------|---------|
-| `hermes chat` | Interactive or one-shot chat with the agent. |
-| `hermes model` | Interactively choose the default provider and model. |
-| `hermes gateway` | Run or manage the messaging gateway service. |
-| `hermes setup` | Interactive setup wizard for all or part of the configuration. |
-| `hermes whatsapp` | Configure and pair the WhatsApp bridge. |
-| `hermes auth` | Manage credentials — add, list, remove, reset, set strategy. Handles OAuth flows for Codex/Nous/Anthropic. |
-| `hermes login` / `logout` | **Deprecated** — use `hermes auth` instead. |
-| `hermes status` | Show agent, auth, and platform status. |
-| `hermes cron` | Inspect and tick the cron scheduler. |
-| `hermes webhook` | Manage dynamic webhook subscriptions for event-driven activation. |
-| `hermes doctor` | Diagnose config and dependency issues. |
-| `hermes config` | Show, edit, migrate, and query configuration files. |
-| `hermes pairing` | Approve or revoke messaging pairing codes. |
-| `hermes skills` | Browse, install, publish, audit, and configure skills. |
-| `hermes honcho` | Manage Honcho cross-session memory integration. |
-| `hermes memory` | Configure external memory provider. |
-| `hermes acp` | Run Hermes as an ACP server for editor integration. |
-| `hermes mcp` | Manage MCP server configurations and run Hermes as an MCP server. |
-| `hermes plugins` | Manage Hermes Agent plugins (install, enable, disable, remove). |
-| `hermes tools` | Configure enabled tools per platform. |
-| `hermes sessions` | Browse, export, prune, rename, and delete sessions. |
-| `hermes insights` | Show token/cost/activity analytics. |
-| `hermes claw` | OpenClaw migration helpers. |
-| `hermes profile` | Manage profiles — multiple isolated Hermes instances. |
-| `hermes completion` | Print shell completion scripts (bash/zsh). |
-| `hermes version` | Show version information. |
-| `hermes update` | Pull latest code and reinstall dependencies. |
-| `hermes uninstall` | Remove Hermes from the system. |
+| `drewgent` chat` | Interactive or one-shot chat with the agent. |
+| `drewgent` model` | Interactively choose the default provider and model. |
+| `drewgent gateway` | Run or manage the messaging gateway service. |
+| `drewgent setup` | Interactive setup wizard for all or part of the configuration. |
+| `drewgent` whatsapp` | Configure and pair the WhatsApp bridge. |
+| `drewgent` auth` | Manage credentials — add, list, remove, reset, set strategy. Handles OAuth flows for Codex/Nous/Anthropic. |
+| `drewgent` login` / `logout` | **Deprecated** — use `drewgent` auth` instead. |
+| `drewgent status` | Show agent, auth, and platform status. |
+| `drewgent` cron` | Inspect and tick the cron scheduler. |
+| `drewgent` webhook` | Manage dynamic webhook subscriptions for event-driven activation. |
+| `drewgent doctor` | Diagnose config and dependency issues. |
+| `drewgent` config` | Show, edit, migrate, and query configuration files. |
+| `drewgent` pairing` | Approve or revoke messaging pairing codes. |
+| `drewgent skills` | Browse, install, publish, audit, and configure skills. |
+| `drewgent` honcho` | Manage Honcho cross-session memory integration. |
+| `drewgent` memory` | Configure external memory provider. |
+| `drewgent acp` | Run Drewgent as an ACP server for editor integration. |
+| `drewgent` mcp` | Manage MCP server configurations and run Drewgent as an MCP server. |
+| `drewgent` plugins` | Manage Drewgent Agent plugins (install, enable, disable, remove). |
+| `drewgent` tools` | Configure enabled tools per platform. |
+| `drewgent` sessions` | Browse, export, prune, rename, and delete sessions. |
+| `drewgent` insights` | Show token/cost/activity analytics. |
+| `drewgent claw` | OpenClaw migration helpers. |
+| `drewgent` profile` | Manage profiles — multiple isolated Drewgent instances. |
+| `drewgent` completion` | Print shell completion scripts (bash/zsh). |
+| `drewgent` version` | Show version information. |
+| `drewgent` update` | Pull latest code and reinstall dependencies. |
+| `drewgent` uninstall` | Remove Drewgent from the system. |
 
-## `hermes chat`
+## `drewgent` chat`
 
 ```bash
 hermes chat [options]
@@ -97,7 +97,7 @@ hermes chat --quiet -q "Return only JSON"
 hermes chat --worktree -q "Review this repo and open a PR"
 ```
 
-## `hermes model`
+## `drewgent` model`
 
 Interactive provider + model selector.
 
@@ -128,10 +128,10 @@ Switch models without leaving a session:
 
 Provider and base URL changes are persisted to `config.yaml` automatically. When switching away from a custom endpoint, the stale base URL is cleared to prevent it leaking into other providers.
 
-## `hermes gateway`
+## `drewgent gateway`
 
 ```bash
-hermes gateway <subcommand>
+drewgent gateway <subcommand>
 ```
 
 Subcommands:
@@ -147,10 +147,10 @@ Subcommands:
 | `uninstall` | Remove the installed service. |
 | `setup` | Interactive messaging-platform setup. |
 
-## `hermes setup`
+## `drewgent setup`
 
 ```bash
-hermes setup [model|terminal|gateway|tools|agent] [--non-interactive] [--reset]
+drewgent setup [model|terminal|gateway|tools|agent] [--non-interactive] [--reset]
 ```
 
 Use the full wizard or jump into one section:
@@ -170,7 +170,7 @@ Options:
 | `--non-interactive` | Use defaults / environment values without prompts. |
 | `--reset` | Reset configuration to defaults before setup. |
 
-## `hermes whatsapp`
+## `drewgent` whatsapp`
 
 ```bash
 hermes whatsapp
@@ -178,13 +178,13 @@ hermes whatsapp
 
 Runs the WhatsApp pairing/setup flow, including mode selection and QR-code pairing.
 
-## `hermes login` / `hermes logout` *(Deprecated)*
+## `drewgent` login` / `drewgent` logout` *(Deprecated)*
 
 :::caution
-`hermes login` has been removed. Use `hermes auth` to manage OAuth credentials, `hermes model` to select a provider, or `hermes setup` for full interactive setup.
+`drewgent` login` has been removed. Use `drewgent` auth` to manage OAuth credentials, `drewgent` model` to select a provider, or `drewgent setup` for full interactive setup.
 :::
 
-## `hermes auth`
+## `drewgent` auth`
 
 Manage credential pools for same-provider key rotation. See [Credential Pools](/docs/user-guide/features/credential-pools) for full documentation.
 
@@ -200,10 +200,10 @@ hermes auth reset openrouter                             # Clear cooldowns
 
 Subcommands: `add`, `list`, `remove`, `reset`. When called with no subcommand, launches the interactive management wizard.
 
-## `hermes status`
+## `drewgent status`
 
 ```bash
-hermes status [--all] [--deep]
+drewgent status [--all] [--deep]
 ```
 
 | Option | Description |
@@ -211,7 +211,7 @@ hermes status [--all] [--deep]
 | `--all` | Show all details in a shareable redacted format. |
 | `--deep` | Run deeper checks that may take longer. |
 
-## `hermes cron`
+## `drewgent` cron`
 
 ```bash
 hermes cron <list|create|edit|pause|resume|run|remove|status|tick>
@@ -229,7 +229,7 @@ hermes cron <list|create|edit|pause|resume|run|remove|status|tick>
 | `status` | Check whether the cron scheduler is running. |
 | `tick` | Run due jobs once and exit. |
 
-## `hermes webhook`
+## `drewgent` webhook`
 
 ```bash
 hermes webhook <subscribe|list|remove|test>
@@ -244,7 +244,7 @@ Manage dynamic webhook subscriptions for event-driven agent activation. Requires
 | `remove` / `rm` | Delete a dynamic subscription. Static routes from config.yaml are not affected. |
 | `test` | Send a test POST to verify a subscription is working. |
 
-### `hermes webhook subscribe`
+### `drewgent` webhook subscribe`
 
 ```bash
 hermes webhook subscribe <name> [options]
@@ -260,19 +260,19 @@ hermes webhook subscribe <name> [options]
 | `--deliver-chat-id` | Target chat/channel ID for cross-platform delivery. |
 | `--secret` | Custom HMAC secret. Auto-generated if omitted. |
 
-Subscriptions persist to `~/.hermes/webhook_subscriptions.json` and are hot-reloaded by the webhook adapter without a gateway restart.
+Subscriptions persist to `~/.drewgent/webhook_subscriptions.json` and are hot-reloaded by the webhook adapter without a gateway restart.
 
-## `hermes doctor`
+## `drewgent doctor`
 
 ```bash
-hermes doctor [--fix]
+drewgent doctor [--fix]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--fix` | Attempt automatic repairs where possible. |
 
-## `hermes config`
+## `drewgent` config`
 
 ```bash
 hermes config <subcommand>
@@ -290,7 +290,7 @@ Subcommands:
 | `check` | Check for missing or stale config. |
 | `migrate` | Add newly introduced options interactively. |
 
-## `hermes pairing`
+## `drewgent` pairing`
 
 ```bash
 hermes pairing <list|approve|revoke|clear-pending>
@@ -303,10 +303,10 @@ hermes pairing <list|approve|revoke|clear-pending>
 | `revoke <platform> <user-id>` | Revoke a user's access. |
 | `clear-pending` | Clear pending pairing codes. |
 
-## `hermes skills`
+## `drewgent skills`
 
 ```bash
-hermes skills <subcommand>
+drewgent skills <subcommand>
 ```
 
 Subcommands:
@@ -330,26 +330,26 @@ Subcommands:
 Common examples:
 
 ```bash
-hermes skills browse
-hermes skills browse --source official
-hermes skills search react --source skills-sh
-hermes skills search https://mintlify.com/docs --source well-known
-hermes skills inspect official/security/1password
-hermes skills inspect skills-sh/vercel-labs/json-render/json-render-react
-hermes skills install official/migration/openclaw-migration
-hermes skills install skills-sh/anthropics/skills/pdf --force
-hermes skills check
-hermes skills update
-hermes skills config
+drewgent skills browse
+drewgent skills browse --source official
+drewgent skills search react --source skills-sh
+drewgent skills search https://mintlify.com/docs --source well-known
+drewgent skills inspect official/security/1password
+drewgent skills inspect skills-sh/vercel-labs/json-render/json-render-react
+drewgent skills install official/migration/openclaw-migration
+drewgent skills install skills-sh/anthropics/skills/pdf --force
+drewgent skills check
+drewgent skills update
+drewgent skills config
 ```
 
 Notes:
 - `--force` can override non-dangerous policy blocks for third-party/community skills.
 - `--force` does not override a `dangerous` scan verdict.
 - `--source skills-sh` searches the public `skills.sh` directory.
-- `--source well-known` lets you point Hermes at a site exposing `/.well-known/skills/index.json`.
+- `--source well-known` lets you point Drewgent at a site exposing `/.well-known/skills/index.json`.
 
-## `hermes honcho`
+## `drewgent` honcho`
 
 ```bash
 hermes honcho [--target-profile NAME] <subcommand>
@@ -363,7 +363,7 @@ Subcommands:
 
 | Subcommand | Description |
 |------------|-------------|
-| `setup` | Redirects to `hermes memory setup` (unified setup path). |
+| `setup` | Redirects to `drewgent` memory setup` (unified setup path). |
 | `status [--all]` | Show current Honcho config and connection status. `--all` shows a cross-profile overview. |
 | `peers` | Show peer identities across all profiles. |
 | `sessions` | List known Honcho session mappings. |
@@ -375,9 +375,9 @@ Subcommands:
 | `enable` | Enable Honcho for the active profile. |
 | `disable` | Disable Honcho for the active profile. |
 | `sync` | Sync Honcho config to all existing profiles (creates missing host blocks). |
-| `migrate` | Step-by-step migration guide from openclaw-honcho to Hermes Honcho. |
+| `migrate` | Step-by-step migration guide from openclaw-honcho to Drewgent Honcho. |
 
-## `hermes memory`
+## `drewgent` memory`
 
 ```bash
 hermes memory <subcommand>
@@ -393,18 +393,18 @@ Subcommands:
 | `status` | Show current memory provider config. |
 | `off` | Disable external provider (built-in only). |
 
-## `hermes acp`
+## `drewgent acp`
 
 ```bash
-hermes acp
+drewgent acp
 ```
 
-Starts Hermes as an ACP (Agent Client Protocol) stdio server for editor integration.
+Starts Drewgent as an ACP (Agent Client Protocol) stdio server for editor integration.
 
 Related entrypoints:
 
 ```bash
-hermes-acp
+drewgent-acp
 python -m acp_adapter
 ```
 
@@ -416,32 +416,32 @@ pip install -e '.[acp]'
 
 See [ACP Editor Integration](../user-guide/features/acp.md) and [ACP Internals](../developer-guide/acp-internals.md).
 
-## `hermes mcp`
+## `drewgent` mcp`
 
 ```bash
 hermes mcp <subcommand>
 ```
 
-Manage MCP (Model Context Protocol) server configurations and run Hermes as an MCP server.
+Manage MCP (Model Context Protocol) server configurations and run Drewgent as an MCP server.
 
 | Subcommand | Description |
 |------------|-------------|
-| `serve [-v\|--verbose]` | Run Hermes as an MCP server — expose conversations to other agents. |
+| `serve [-v\|--verbose]` | Run Drewgent as an MCP server — expose conversations to other agents. |
 | `add <name> [--url URL] [--command CMD] [--args ...] [--auth oauth\|header]` | Add an MCP server with automatic tool discovery. |
 | `remove <name>` (alias: `rm`) | Remove an MCP server from config. |
 | `list` (alias: `ls`) | List configured MCP servers. |
 | `test <name>` | Test connection to an MCP server. |
 | `configure <name>` (alias: `config`) | Toggle tool selection for a server. |
 
-See [MCP Config Reference](./mcp-config-reference.md), [Use MCP with Hermes](../guides/use-mcp-with-hermes.md), and [MCP Server Mode](../user-guide/features/mcp.md#running-hermes-as-an-mcp-server).
+See [MCP Config Reference](./mcp-config-reference.md), [Use MCP with Drewgent](../guides/use-mcp-with-hermes.md), and [MCP Server Mode](../user-guide/features/mcp.md#running-drewgent-as-an-mcp-server).
 
-## `hermes plugins`
+## `drewgent` plugins`
 
 ```bash
 hermes plugins [subcommand]
 ```
 
-Manage Hermes Agent plugins. Running `hermes plugins` with no subcommand launches an interactive curses checklist to enable/disable installed plugins.
+Manage Drewgent Agent plugins. Running `drewgent` plugins` with no subcommand launches an interactive curses checklist to enable/disable installed plugins.
 
 | Subcommand | Description |
 |------------|-------------|
@@ -455,9 +455,9 @@ Manage Hermes Agent plugins. Running `hermes plugins` with no subcommand launche
 
 Disabled plugins are stored in `config.yaml` under `plugins.disabled` and skipped during loading.
 
-See [Plugins](../user-guide/features/plugins.md) and [Build a Hermes Plugin](../guides/build-a-hermes-plugin.md).
+See [Plugins](../user-guide/features/plugins.md) and [Build a Drewgent Plugin](../guides/build-a-drewgent-plugin.md).
 
-## `hermes tools`
+## `drewgent` tools`
 
 ```bash
 hermes tools [--summary]
@@ -469,7 +469,7 @@ hermes tools [--summary]
 
 Without `--summary`, this launches the interactive per-platform tool configuration UI.
 
-## `hermes sessions`
+## `drewgent` sessions`
 
 ```bash
 hermes sessions <subcommand>
@@ -487,7 +487,7 @@ Subcommands:
 | `stats` | Show session-store statistics. |
 | `rename <session-id> <title>` | Set or change a session title. |
 
-## `hermes insights`
+## `drewgent` insights`
 
 ```bash
 hermes insights [--days N] [--source platform]
@@ -498,19 +498,19 @@ hermes insights [--days N] [--source platform]
 | `--days <n>` | Analyze the last `n` days (default: 30). |
 | `--source <platform>` | Filter by source such as `cli`, `telegram`, or `discord`. |
 
-## `hermes claw`
+## `drewgent claw`
 
 ```bash
-hermes claw migrate [options]
+drewgent claw migrate [options]
 ```
 
-Migrate your OpenClaw setup to Hermes. Reads from `~/.openclaw` (or a custom path) and writes to `~/.hermes`. Automatically detects legacy directory names (`~/.clawdbot`, `~/.moldbot`) and config filenames (`clawdbot.json`, `moldbot.json`).
+Migrate your OpenClaw setup to Drewgent. Reads from `~/.openclaw` (or a custom path) and writes to `~/.drewgent`. Automatically detects legacy directory names (`~/.clawdbot`, `~/.moldbot`) and config filenames (`clawdbot.json`, `moldbot.json`).
 
 | Option | Description |
 |--------|-------------|
 | `--dry-run` | Preview what would be migrated without writing anything. |
 | `--preset <name>` | Migration preset: `full` (default, includes secrets) or `user-data` (excludes API keys). |
-| `--overwrite` | Overwrite existing Hermes files on conflicts (default: skip). |
+| `--overwrite` | Overwrite existing Drewgent files on conflicts (default: skip). |
 | `--migrate-secrets` | Include API keys in migration (enabled by default with `--preset full`). |
 | `--source <path>` | Custom OpenClaw directory (default: `~/.openclaw`). |
 | `--workspace-target <path>` | Target directory for workspace instructions (AGENTS.md). |
@@ -519,7 +519,7 @@ Migrate your OpenClaw setup to Hermes. Reads from `~/.openclaw` (or a custom pat
 
 ### What gets migrated
 
-The migration covers 30+ categories across persona, memory, skills, model providers, messaging platforms, agent behavior, session policies, MCP servers, TTS, and more. Items are either **directly imported** into Hermes equivalents or **archived** for manual review.
+The migration covers 30+ categories across persona, memory, skills, model providers, messaging platforms, agent behavior, session policies, MCP servers, TTS, and more. Items are either **directly imported** into Drewgent equivalents or **archived** for manual review.
 
 **Directly imported:** SOUL.md, MEMORY.md, USER.md, AGENTS.md, skills (4 source directories), default model, custom providers, MCP servers, messaging platform tokens and allowlists (Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Mattermost), agent defaults (reasoning effort, compression, human delay, timezone, sandbox), session reset policies, approval rules, TTS config, browser settings, tool settings, exec timeout, command allowlist, gateway config, and API keys from 3 sources.
 
@@ -533,25 +533,25 @@ For the complete config key mapping, SecretRef handling details, and post-migrat
 
 ```bash
 # Preview what would be migrated
-hermes claw migrate --dry-run
+drewgent claw migrate --dry-run
 
 # Full migration including API keys
-hermes claw migrate --preset full
+drewgent claw migrate --preset full
 
 # Migrate user data only (no secrets), overwrite conflicts
-hermes claw migrate --preset user-data --overwrite
+drewgent claw migrate --preset user-data --overwrite
 
 # Migrate from a custom OpenClaw path
-hermes claw migrate --source /home/user/old-openclaw
+drewgent claw migrate --source /home/user/old-openclaw
 ```
 
-## `hermes profile`
+## `drewgent` profile`
 
 ```bash
 hermes profile <subcommand>
 ```
 
-Manage profiles — multiple isolated Hermes instances, each with its own config, sessions, skills, and home directory.
+Manage profiles — multiple isolated Drewgent instances, each with its own config, sessions, skills, and home directory.
 
 | Subcommand | Description |
 |------------|-------------|
@@ -577,13 +577,13 @@ hermes profile import work-backup.tar.gz --name restored
 hermes -p work chat -q "Hello from work profile"
 ```
 
-## `hermes completion`
+## `drewgent` completion`
 
 ```bash
 hermes completion [bash|zsh]
 ```
 
-Print a shell completion script to stdout. Source the output in your shell profile for tab-completion of Hermes commands, subcommands, and profile names.
+Print a shell completion script to stdout. Source the output in your shell profile for tab-completion of Drewgent commands, subcommands, and profile names.
 
 Examples:
 
@@ -599,9 +599,9 @@ hermes completion zsh >> ~/.zshrc
 
 | Command | Description |
 |---------|-------------|
-| `hermes version` | Print version information. |
-| `hermes update` | Pull latest changes and reinstall dependencies. |
-| `hermes uninstall [--full] [--yes]` | Remove Hermes, optionally deleting all config/data. |
+| `drewgent` version` | Print version information. |
+| `drewgent` update` | Pull latest changes and reinstall dependencies. |
+| `drewgent` uninstall [--full] [--yes]` | Remove Drewgent, optionally deleting all config/data. |
 
 ## See also
 

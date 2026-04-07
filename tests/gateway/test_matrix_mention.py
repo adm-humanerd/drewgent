@@ -107,8 +107,8 @@ class TestIsBotMentioned:
         assert self.adapter._is_bot_mentioned("HERMES can you help?")
 
     def test_matrix_pill_in_formatted_body(self):
-        html = '<a href="https://matrix.to/#/@hermes:example.org">Hermes</a> help'
-        assert self.adapter._is_bot_mentioned("Hermes help", html)
+        html = '<a href="https://matrix.to/#/@hermes:example.org">Drewgent</a> help'
+        assert self.adapter._is_bot_mentioned("Drewgent help", html)
 
     def test_no_mention(self):
         assert not self.adapter._is_bot_mentioned("hello everyone")
@@ -117,7 +117,7 @@ class TestIsBotMentioned:
         assert not self.adapter._is_bot_mentioned("")
 
     def test_partial_localpart_no_match(self):
-        # "hermesbot" should not match word-boundary check for "hermes"
+        # "hermesbot" should not match word-boundary check for "drewgent"
         assert not self.adapter._is_bot_mentioned("hermesbot is here")
 
 
@@ -184,8 +184,8 @@ async def test_require_mention_html_pill(monkeypatch):
 
     adapter = _make_adapter()
     room = _make_room()
-    formatted = '<a href="https://matrix.to/#/@hermes:example.org">Hermes</a> help'
-    event = _make_event("Hermes help", formatted_body=formatted)
+    formatted = '<a href="https://matrix.to/#/@hermes:example.org">Drewgent</a> help'
+    event = _make_event("Drewgent help", formatted_body=formatted)
 
     await adapter._on_room_message(room, event)
     adapter.handle_message.assert_awaited_once()

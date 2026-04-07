@@ -1,4 +1,4 @@
-"""Tests for hermes_logging — centralized logging setup."""
+"""Tests for drewgent_logging — centralized logging setup."""
 
 import logging
 import os
@@ -8,14 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-import hermes_logging
+import drewgent_logging
 
 
 @pytest.fixture(autouse=True)
 def _reset_logging_state():
     """Reset the module-level sentinel and clean up root logger handlers
     added by setup_logging() so tests don't leak state."""
-    hermes_logging._logging_initialized = False
+    drewgent_logging._logging_initialized = False
     root = logging.getLogger()
     original_handlers = list(root.handlers)
     yield
@@ -24,30 +24,30 @@ def _reset_logging_state():
         if h not in original_handlers:
             root.removeHandler(h)
             h.close()
-    hermes_logging._logging_initialized = False
+    drewgent_logging._logging_initialized = False
 
 
 @pytest.fixture
-def hermes_home(tmp_path, monkeypatch):
-    """Provide an isolated HERMES_HOME for logging tests.
+def drewgent_home(tmp_path, monkeypatch):
+    """Provide an isolated DREW_HOME for logging tests.
 
-    Uses the same tmp_path as the autouse _isolate_hermes_home from conftest,
+    Uses the same tmp_path as the autouse _isolate_drewgent_home from conftest,
     reading it back from the env var to avoid double-mkdir conflicts.
     """
-    home = Path(os.environ["HERMES_HOME"])
+    home = Path(os.environ["DREW_HOME"])
     return home
 
 
 class TestSetupLogging:
     """setup_logging() creates agent.log + errors.log with RotatingFileHandler."""
 
-    def test_creates_log_directory(self, hermes_home):
-        log_dir = hermes_logging.setup_logging(hermes_home=hermes_home)
-        assert log_dir == hermes_home / "logs"
+    def test_creates_log_directory(self, drewgent_home):
+        log_dir = drewgent_logging.setup_logging(drewgent_home=drewgent_home)
+        assert log_dir == drewgent_home / "logs"
         assert log_dir.is_dir()
 
-    def test_creates_agent_log_handler(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+    def test_creates_agent_log_handler(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
         root = logging.getLogger()
 
         agent_handlers = [
@@ -58,8 +58,8 @@ class TestSetupLogging:
         assert len(agent_handlers) == 1
         assert agent_handlers[0].level == logging.INFO
 
-    def test_creates_errors_log_handler(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+    def test_creates_errors_log_handler(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
         root = logging.getLogger()
 
         error_handlers = [
@@ -70,9 +70,9 @@ class TestSetupLogging:
         assert len(error_handlers) == 1
         assert error_handlers[0].level == logging.WARNING
 
-    def test_idempotent_no_duplicate_handlers(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
-        hermes_logging.setup_logging(hermes_home=hermes_home)  # second call — should be no-op
+    def test_idempotent_no_duplicate_handlers(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)  # second call — should be no-op
 
         root = logging.getLogger()
         agent_handlers = [
@@ -82,11 +82,11 @@ class TestSetupLogging:
         ]
         assert len(agent_handlers) == 1
 
-    def test_force_reinitializes(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+    def test_force_reinitializes(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
         # Force still won't add duplicate handlers because _add_rotating_handler
         # checks by resolved path.
-        hermes_logging.setup_logging(hermes_home=hermes_home, force=True)
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home, force=True)
 
         root = logging.getLogger()
         agent_handlers = [
@@ -96,8 +96,8 @@ class TestSetupLogging:
         ]
         assert len(agent_handlers) == 1
 
-    def test_custom_log_level(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home, log_level="DEBUG")
+    def test_custom_log_level(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home, log_level="DEBUG")
 
         root = logging.getLogger()
         agent_handlers = [
@@ -107,9 +107,9 @@ class TestSetupLogging:
         ]
         assert agent_handlers[0].level == logging.DEBUG
 
-    def test_custom_max_size_and_backup(self, hermes_home):
-        hermes_logging.setup_logging(
-            hermes_home=hermes_home, max_size_mb=10, backup_count=5
+    def test_custom_max_size_and_backup(self, drewgent_home):
+        drewgent_logging.setup_logging(
+            drewgent_home=drewgent_home, max_size_mb=10, backup_count=5
         )
 
         root = logging.getLogger()
@@ -121,62 +121,62 @@ class TestSetupLogging:
         assert agent_handlers[0].maxBytes == 10 * 1024 * 1024
         assert agent_handlers[0].backupCount == 5
 
-    def test_suppresses_noisy_loggers(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+    def test_suppresses_noisy_loggers(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
 
         assert logging.getLogger("openai").level >= logging.WARNING
         assert logging.getLogger("httpx").level >= logging.WARNING
         assert logging.getLogger("httpcore").level >= logging.WARNING
 
-    def test_writes_to_agent_log(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+    def test_writes_to_agent_log(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
 
-        test_logger = logging.getLogger("test_hermes_logging.write_test")
+        test_logger = logging.getLogger("test_drewgent_logging.write_test")
         test_logger.info("test message for agent.log")
 
         # Flush handlers
         for h in logging.getLogger().handlers:
             h.flush()
 
-        agent_log = hermes_home / "logs" / "agent.log"
+        agent_log = drewgent_home / "logs" / "agent.log"
         assert agent_log.exists()
         content = agent_log.read_text()
         assert "test message for agent.log" in content
 
-    def test_warnings_appear_in_both_logs(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+    def test_warnings_appear_in_both_logs(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
 
-        test_logger = logging.getLogger("test_hermes_logging.warning_test")
+        test_logger = logging.getLogger("test_drewgent_logging.warning_test")
         test_logger.warning("this is a warning")
 
         for h in logging.getLogger().handlers:
             h.flush()
 
-        agent_log = hermes_home / "logs" / "agent.log"
-        errors_log = hermes_home / "logs" / "errors.log"
+        agent_log = drewgent_home / "logs" / "agent.log"
+        errors_log = drewgent_home / "logs" / "errors.log"
         assert "this is a warning" in agent_log.read_text()
         assert "this is a warning" in errors_log.read_text()
 
-    def test_info_not_in_errors_log(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+    def test_info_not_in_errors_log(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
 
-        test_logger = logging.getLogger("test_hermes_logging.info_test")
+        test_logger = logging.getLogger("test_drewgent_logging.info_test")
         test_logger.info("info only message")
 
         for h in logging.getLogger().handlers:
             h.flush()
 
-        errors_log = hermes_home / "logs" / "errors.log"
+        errors_log = drewgent_home / "logs" / "errors.log"
         if errors_log.exists():
             assert "info only message" not in errors_log.read_text()
 
-    def test_reads_config_yaml(self, hermes_home):
+    def test_reads_config_yaml(self, drewgent_home):
         """setup_logging reads logging.level from config.yaml."""
         import yaml
         config = {"logging": {"level": "DEBUG", "max_size_mb": 2, "backup_count": 1}}
-        (hermes_home / "config.yaml").write_text(yaml.dump(config))
+        (drewgent_home / "config.yaml").write_text(yaml.dump(config))
 
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
 
         root = logging.getLogger()
         agent_handlers = [
@@ -188,13 +188,13 @@ class TestSetupLogging:
         assert agent_handlers[0].maxBytes == 2 * 1024 * 1024
         assert agent_handlers[0].backupCount == 1
 
-    def test_explicit_params_override_config(self, hermes_home):
+    def test_explicit_params_override_config(self, drewgent_home):
         """Explicit function params take precedence over config.yaml."""
         import yaml
         config = {"logging": {"level": "DEBUG"}}
-        (hermes_home / "config.yaml").write_text(yaml.dump(config))
+        (drewgent_home / "config.yaml").write_text(yaml.dump(config))
 
-        hermes_logging.setup_logging(hermes_home=hermes_home, log_level="WARNING")
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home, log_level="WARNING")
 
         root = logging.getLogger()
         agent_handlers = [
@@ -208,31 +208,31 @@ class TestSetupLogging:
 class TestSetupVerboseLogging:
     """setup_verbose_logging() adds a DEBUG-level console handler."""
 
-    def test_adds_stream_handler(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
-        hermes_logging.setup_verbose_logging()
+    def test_adds_stream_handler(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
+        drewgent_logging.setup_verbose_logging()
 
         root = logging.getLogger()
         verbose_handlers = [
             h for h in root.handlers
             if isinstance(h, logging.StreamHandler)
             and not isinstance(h, RotatingFileHandler)
-            and getattr(h, "_hermes_verbose", False)
+            and getattr(h, "_drewgent_verbose", False)
         ]
         assert len(verbose_handlers) == 1
         assert verbose_handlers[0].level == logging.DEBUG
 
-    def test_idempotent(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
-        hermes_logging.setup_verbose_logging()
-        hermes_logging.setup_verbose_logging()  # second call
+    def test_idempotent(self, drewgent_home):
+        drewgent_logging.setup_logging(drewgent_home=drewgent_home)
+        drewgent_logging.setup_verbose_logging()
+        drewgent_logging.setup_verbose_logging()  # second call
 
         root = logging.getLogger()
         verbose_handlers = [
             h for h in root.handlers
             if isinstance(h, logging.StreamHandler)
             and not isinstance(h, RotatingFileHandler)
-            and getattr(h, "_hermes_verbose", False)
+            and getattr(h, "_drewgent_verbose", False)
         ]
         assert len(verbose_handlers) == 1
 
@@ -245,7 +245,7 @@ class TestAddRotatingHandler:
         logger = logging.getLogger("_test_rotating")
         formatter = logging.Formatter("%(message)s")
 
-        hermes_logging._add_rotating_handler(
+        drewgent_logging._add_rotating_handler(
             logger, log_path,
             level=logging.INFO, max_bytes=1024, backup_count=1,
             formatter=formatter,
@@ -263,12 +263,12 @@ class TestAddRotatingHandler:
         logger = logging.getLogger("_test_rotating_dup")
         formatter = logging.Formatter("%(message)s")
 
-        hermes_logging._add_rotating_handler(
+        drewgent_logging._add_rotating_handler(
             logger, log_path,
             level=logging.INFO, max_bytes=1024, backup_count=1,
             formatter=formatter,
         )
-        hermes_logging._add_rotating_handler(
+        drewgent_logging._add_rotating_handler(
             logger, log_path,
             level=logging.INFO, max_bytes=1024, backup_count=1,
             formatter=formatter,
@@ -289,26 +289,26 @@ class TestAddRotatingHandler:
 class TestReadLoggingConfig:
     """_read_logging_config() reads from config.yaml."""
 
-    def test_returns_none_when_no_config(self, hermes_home):
-        level, max_size, backup = hermes_logging._read_logging_config()
+    def test_returns_none_when_no_config(self, drewgent_home):
+        level, max_size, backup = drewgent_logging._read_logging_config()
         assert level is None
         assert max_size is None
         assert backup is None
 
-    def test_reads_logging_section(self, hermes_home):
+    def test_reads_logging_section(self, drewgent_home):
         import yaml
         config = {"logging": {"level": "DEBUG", "max_size_mb": 10, "backup_count": 5}}
-        (hermes_home / "config.yaml").write_text(yaml.dump(config))
+        (drewgent_home / "config.yaml").write_text(yaml.dump(config))
 
-        level, max_size, backup = hermes_logging._read_logging_config()
+        level, max_size, backup = drewgent_logging._read_logging_config()
         assert level == "DEBUG"
         assert max_size == 10
         assert backup == 5
 
-    def test_handles_missing_logging_section(self, hermes_home):
+    def test_handles_missing_logging_section(self, drewgent_home):
         import yaml
         config = {"model": "test"}
-        (hermes_home / "config.yaml").write_text(yaml.dump(config))
+        (drewgent_home / "config.yaml").write_text(yaml.dump(config))
 
-        level, max_size, backup = hermes_logging._read_logging_config()
+        level, max_size, backup = drewgent_logging._read_logging_config()
         assert level is None

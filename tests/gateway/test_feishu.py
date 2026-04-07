@@ -96,8 +96,8 @@ class TestGatewayIntegration(unittest.TestCase):
     def test_feishu_toolset_exists(self):
         from toolsets import TOOLSETS
 
-        self.assertIn("hermes-feishu", TOOLSETS)
-        self.assertIn("hermes-feishu", TOOLSETS["hermes-gateway"]["includes"])
+        self.assertIn("drewgent-feishu", TOOLSETS)
+        self.assertIn("drewgent-feishu", TOOLSETS["drewgent-gateway"]["includes"])
 
 
 class TestFeishuPostParsing(unittest.TestCase):
@@ -516,7 +516,7 @@ class TestFeishuAdapterMessaging(unittest.TestCase):
                 self.request = request
                 return SimpleNamespace(
                     success=lambda: True,
-                    data=SimpleNamespace(name="Hermes Group", chat_type="group"),
+                    data=SimpleNamespace(name="Drewgent Group", chat_type="group"),
                 )
 
         chat_api = _ChatAPI()
@@ -536,7 +536,7 @@ class TestFeishuAdapterMessaging(unittest.TestCase):
 
         self.assertEqual(chat_api.request.chat_id, "oc_chat")
         self.assertEqual(info["chat_id"], "oc_chat")
-        self.assertEqual(info["name"], "Hermes Group")
+        self.assertEqual(info["name"], "Drewgent Group")
         self.assertEqual(info["type"], "group")
 
 class TestAdapterModule(unittest.TestCase):
@@ -846,7 +846,7 @@ class TestAdapterBehavior(unittest.TestCase):
         {
             "FEISHU_GROUP_POLICY": "allowlist",
             "FEISHU_ALLOWED_USERS": "ou_allowed",
-            "FEISHU_BOT_NAME": "Hermes Bot",
+            "FEISHU_BOT_NAME": "Drewgent Bot",
         },
         clear=True,
     )
@@ -858,7 +858,7 @@ class TestAdapterBehavior(unittest.TestCase):
         mentioned = SimpleNamespace(
             mentions=[
                 SimpleNamespace(
-                    name="Hermes Bot",
+                    name="Drewgent Bot",
                     id=SimpleNamespace(open_id="ou_other", user_id="u_other"),
                 )
             ]
@@ -1087,7 +1087,7 @@ class TestAdapterBehavior(unittest.TestCase):
         sender_id = SimpleNamespace(open_id="ou_any", user_id=None)
 
         bot_mention = SimpleNamespace(
-            name="Hermes",
+            name="Drewgent",
             id=SimpleNamespace(open_id="ou_bot", user_id="u_bot"),
         )
         other_mention = SimpleNamespace(
@@ -1104,11 +1104,11 @@ class TestAdapterBehavior(unittest.TestCase):
         from gateway.platforms.feishu import FeishuAdapter
 
         adapter = FeishuAdapter(PlatformConfig())
-        adapter._bot_name = "Hermes Bot"
+        adapter._bot_name = "Drewgent Bot"
         sender_id = SimpleNamespace(open_id="ou_any", user_id=None)
 
         named_mention = SimpleNamespace(
-            name="Hermes Bot",
+            name="Drewgent Bot",
             id=SimpleNamespace(open_id="ou_other", user_id="u_other"),
         )
         different_mention = SimpleNamespace(
@@ -1130,7 +1130,7 @@ class TestAdapterBehavior(unittest.TestCase):
         message = SimpleNamespace(
             message_type="post",
             mentions=[],
-            content='{"en_us":{"content":[[{"tag":"at","user_name":"Hermes","open_id":"ou_bot"}]]}}',
+            content='{"en_us":{"content":[[{"tag":"at","user_name":"Drewgent","open_id":"ou_bot"}]]}}',
         )
 
         self.assertTrue(adapter._should_accept_group_message(message, sender_id, ""))
@@ -1800,7 +1800,7 @@ class TestAdapterBehavior(unittest.TestCase):
         from gateway.platforms.feishu import FeishuAdapter
 
         with tempfile.TemporaryDirectory() as temp_home:
-            with patch.dict(os.environ, {"HERMES_HOME": temp_home}, clear=False):
+            with patch.dict(os.environ, {"DREW_HOME": temp_home}, clear=False):
                 first = FeishuAdapter(PlatformConfig())
                 self.assertFalse(first._is_duplicate("om_same"))
                 second = FeishuAdapter(PlatformConfig())

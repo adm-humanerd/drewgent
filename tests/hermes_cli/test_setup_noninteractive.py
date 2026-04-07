@@ -36,33 +36,33 @@ class TestNonInteractiveSetup:
 
     def test_non_interactive_flag_skips_wizard(self, capsys):
         """--non-interactive should print guidance and not enter the wizard."""
-        from hermes_cli.setup import run_setup_wizard
+        from drewgent_cli.setup import run_setup_wizard
 
         args = _make_setup_args(non_interactive=True)
 
         with (
-            patch("hermes_cli.setup.ensure_hermes_home"),
-            patch("hermes_cli.setup.load_config", return_value={}),
-            patch("hermes_cli.setup.get_hermes_home", return_value="/tmp/.hermes"),
-            patch("hermes_cli.auth.get_active_provider", side_effect=AssertionError("wizard continued")),
+            patch("drewgent_cli.setup.ensure_drewgent_home"),
+            patch("drewgent_cli.setup.load_config", return_value={}),
+            patch("drewgent_cli.setup.get_drewgent_home", return_value="/tmp/.hermes"),
+            patch("drewgent_cli.auth.get_active_provider", side_effect=AssertionError("wizard continued")),
             patch("builtins.input", side_effect=AssertionError("input should not be called")),
         ):
             run_setup_wizard(args)
 
         out = capsys.readouterr().out
-        assert "hermes config set model.provider custom" in out
+        assert "drewgent config set model.provider custom" in out
 
     def test_no_tty_skips_wizard(self, capsys):
         """When stdin has no TTY, the setup wizard should print guidance and return."""
-        from hermes_cli.setup import run_setup_wizard
+        from drewgent_cli.setup import run_setup_wizard
 
         args = _make_setup_args(non_interactive=False)
 
         with (
-            patch("hermes_cli.setup.ensure_hermes_home"),
-            patch("hermes_cli.setup.load_config", return_value={}),
-            patch("hermes_cli.setup.get_hermes_home", return_value="/tmp/.hermes"),
-            patch("hermes_cli.auth.get_active_provider", side_effect=AssertionError("wizard continued")),
+            patch("drewgent_cli.setup.ensure_drewgent_home"),
+            patch("drewgent_cli.setup.load_config", return_value={}),
+            patch("drewgent_cli.setup.get_drewgent_home", return_value="/tmp/.hermes"),
+            patch("drewgent_cli.auth.get_active_provider", side_effect=AssertionError("wizard continued")),
             patch("sys.stdin") as mock_stdin,
             patch("builtins.input", side_effect=AssertionError("input should not be called")),
         ):
@@ -70,17 +70,17 @@ class TestNonInteractiveSetup:
             run_setup_wizard(args)
 
         out = capsys.readouterr().out
-        assert "hermes config set model.provider custom" in out
+        assert "drewgent config set model.provider custom" in out
 
     def test_chat_first_run_headless_skips_setup_prompt(self, capsys):
         """Bare `hermes` should not prompt for input when no provider exists and stdin is headless."""
-        from hermes_cli.main import cmd_chat
+        from drewgent_cli.main import cmd_chat
 
         args = _make_chat_args()
 
         with (
-            patch("hermes_cli.main._has_any_provider_configured", return_value=False),
-            patch("hermes_cli.main.cmd_setup") as mock_setup,
+            patch("drewgent_cli.main._has_any_provider_configured", return_value=False),
+            patch("drewgent_cli.main.cmd_setup") as mock_setup,
             patch("sys.stdin") as mock_stdin,
             patch("builtins.input", side_effect=AssertionError("input should not be called")),
         ):
@@ -91,11 +91,11 @@ class TestNonInteractiveSetup:
         assert exc.value.code == 1
         mock_setup.assert_not_called()
         out = capsys.readouterr().out
-        assert "hermes config set model.provider custom" in out
+        assert "drewgent config set model.provider custom" in out
 
     def test_returning_user_terminal_menu_choice_dispatches_terminal_section(self, tmp_path):
         """Returning-user menu should map Terminal Backend to the terminal setup, not TTS."""
-        from hermes_cli import setup as setup_mod
+        from drewgent_cli import setup as setup_mod
 
         args = _make_setup_args()
         config = {}
@@ -107,16 +107,16 @@ class TestNonInteractiveSetup:
         agent_section = MagicMock()
 
         with (
-            patch.object(setup_mod, "ensure_hermes_home"),
+            patch.object(setup_mod, "ensure_drewgent_home"),
             patch.object(setup_mod, "load_config", return_value=config),
-            patch.object(setup_mod, "get_hermes_home", return_value=tmp_path),
+            patch.object(setup_mod, "get_drewgent_home", return_value=tmp_path),
             patch.object(setup_mod, "is_interactive_stdin", return_value=True),
             patch.object(
                 setup_mod,
                 "get_env_value",
                 side_effect=lambda key: "sk-test" if key == "OPENROUTER_API_KEY" else "",
             ),
-            patch("hermes_cli.auth.get_active_provider", return_value=None),
+            patch("drewgent_cli.auth.get_active_provider", return_value=None),
             patch.object(setup_mod, "prompt_choice", return_value=4),
             patch.object(
                 setup_mod,

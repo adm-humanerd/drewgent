@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Google Workspace API CLI for Hermes Agent.
+"""Google Workspace API CLI for Drewgent Agent.
 
 A thin CLI wrapper around Google's Python client libraries.
 Authenticates using the token stored by setup.py.
@@ -28,15 +28,15 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 try:
-    from hermes_constants import display_hermes_home, get_hermes_home
+    from drewgent_constants import display_drewgent_home, get_drewgent_home
 except ModuleNotFoundError:
     HERMES_AGENT_ROOT = Path(__file__).resolve().parents[4]
     if HERMES_AGENT_ROOT.exists():
         sys.path.insert(0, str(HERMES_AGENT_ROOT))
-    from hermes_constants import display_hermes_home, get_hermes_home
+    from drewgent_constants import display_drewgent_home, get_drewgent_home
 
-HERMES_HOME = get_hermes_home()
-TOKEN_PATH = HERMES_HOME / "google_token.json"
+DREW_HOME = get_drewgent_home()
+TOKEN_PATH = DREW_HOME / "google_token.json"
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -89,7 +89,7 @@ def get_credentials():
         for scope in missing_scopes:
             print(f"  - {scope}", file=sys.stderr)
         print(
-            f"Re-run setup.py from the active Hermes profile ({display_hermes_home()}) to restore full access.",
+            f"Re-run setup.py from the active Drewgent profile ({display_drewgent_home()}) to restore full access.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -399,7 +399,7 @@ def docs_get(args):
 # =========================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="Google Workspace API for Hermes Agent")
+    parser = argparse.ArgumentParser(description="Google Workspace API for Drewgent Agent")
     sub = parser.add_subparsers(dest="service", required=True)
 
     # --- Gmail ---

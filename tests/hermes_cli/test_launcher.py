@@ -1,4 +1,4 @@
-"""Tests for the top-level `./hermes` launcher script."""
+"""Tests for the top-level `./drewgent` launcher script."""
 
 import runpy
 import sys
@@ -7,17 +7,17 @@ from pathlib import Path
 
 
 def test_launcher_delegates_to_argparse_entrypoint(monkeypatch):
-    """`./hermes` should use `hermes_cli.main`, not the legacy Fire wrapper."""
-    launcher_path = Path(__file__).resolve().parents[2] / "hermes"
+    """`./drewgent` should use `drewgent_cli.main`, not the legacy Fire wrapper."""
+    launcher_path = Path(__file__).resolve().parents[2] / "drewgent"
     called = []
 
-    fake_main_module = types.ModuleType("hermes_cli.main")
+    fake_main_module = types.ModuleType("drewgent_cli.main")
 
     def fake_main():
-        called.append("hermes_cli.main")
+        called.append("drewgent_cli.main")
 
     fake_main_module.main = fake_main
-    monkeypatch.setitem(sys.modules, "hermes_cli.main", fake_main_module)
+    monkeypatch.setitem(sys.modules, "drewgent_cli.main", fake_main_module)
 
     fake_cli_module = types.ModuleType("cli")
 
@@ -39,4 +39,4 @@ def test_launcher_delegates_to_argparse_entrypoint(monkeypatch):
 
     runpy.run_path(str(launcher_path), run_name="__main__")
 
-    assert called == ["hermes_cli.main"]
+    assert called == ["drewgent_cli.main"]

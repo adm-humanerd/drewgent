@@ -1,15 +1,15 @@
 """Regression tests for interactive setup provider/model persistence.
 
 Since setup_model_provider delegates to select_provider_and_model()
-from hermes_cli.main, these tests mock the delegation point and verify
+from drewgent_cli.main, these tests mock the delegation point and verify
 that the setup wizard correctly syncs config from disk after the call.
 """
 
 from __future__ import annotations
 
-from hermes_cli.config import load_config, save_config, save_env_value
-from hermes_cli.nous_subscription import NousFeatureState, NousSubscriptionFeatures
-from hermes_cli.setup import _print_setup_summary, setup_model_provider
+from drewgent_cli.config import load_config, save_config, save_env_value
+from drewgent_cli.nous_subscription import NousFeatureState, NousSubscriptionFeatures
+from drewgent_cli.setup import _print_setup_summary, setup_model_provider
 
 
 def _maybe_keep_current_tts(question, choices):
@@ -38,11 +38,11 @@ def _clear_provider_env(monkeypatch):
 
 
 def _stub_tts(monkeypatch):
-    monkeypatch.setattr("hermes_cli.setup.prompt_choice", lambda q, c, d=0: (
+    monkeypatch.setattr("drewgent_cli.setup.prompt_choice", lambda q, c, d=0: (
         _maybe_keep_current_tts(q, c) if _maybe_keep_current_tts(q, c) is not None
         else d
     ))
-    monkeypatch.setattr("hermes_cli.setup.prompt_yes_no", lambda *a, **kw: False)
+    monkeypatch.setattr("drewgent_cli.setup.prompt_yes_no", lambda *a, **kw: False)
 
 
 def _write_model_config(provider, base_url="", model_name="test-model"):
@@ -65,7 +65,7 @@ def _write_model_config(provider, base_url="", model_name="test-model"):
 
 def test_setup_keep_current_custom_from_config_does_not_fall_through(tmp_path, monkeypatch):
     """Keep-current custom should not fall through to the generic model menu."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     _stub_tts(monkeypatch)
 
@@ -78,7 +78,7 @@ def test_setup_keep_current_custom_from_config_does_not_fall_through(tmp_path, m
     def fake_select():
         pass  # user chose "cancel" or "keep current"
 
-    monkeypatch.setattr("hermes_cli.main.select_provider_and_model", fake_select)
+    monkeypatch.setattr("drewgent_cli.main.select_provider_and_model", fake_select)
 
     setup_model_provider(config)
     save_config(config)
@@ -93,7 +93,7 @@ def test_setup_keep_current_config_provider_uses_provider_specific_model_menu(
     tmp_path, monkeypatch
 ):
     """Keeping current provider preserves the config on disk."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     _stub_tts(monkeypatch)
 
@@ -104,7 +104,7 @@ def test_setup_keep_current_config_provider_uses_provider_specific_model_menu(
     def fake_select():
         pass  # keep current
 
-    monkeypatch.setattr("hermes_cli.main.select_provider_and_model", fake_select)
+    monkeypatch.setattr("drewgent_cli.main.select_provider_and_model", fake_select)
 
     setup_model_provider(config)
     save_config(config)
@@ -115,7 +115,7 @@ def test_setup_keep_current_config_provider_uses_provider_specific_model_menu(
 
 
 def test_setup_same_provider_rotation_strategy_saved_for_multi_credential_pool(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     save_env_value("OPENROUTER_API_KEY", "or-key")
 
@@ -147,8 +147,8 @@ def test_setup_same_provider_rotation_strategy_saved_for_multi_credential_pool(t
         return False
 
     # Patch directly on the module objects to ensure local imports pick them up.
-    import hermes_cli.main as _main_mod
-    import hermes_cli.setup as _setup_mod
+    import drewgent_cli.main as _main_mod
+    import drewgent_cli.setup as _setup_mod
     import agent.credential_pool as _pool_mod
     import agent.auxiliary_client as _aux_mod
 
@@ -169,7 +169,7 @@ def test_setup_same_provider_rotation_strategy_saved_for_multi_credential_pool(t
 
 
 def test_setup_same_provider_fallback_can_add_another_credential(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     save_env_value("OPENROUTER_API_KEY", "or-key")
 
@@ -215,13 +215,13 @@ def test_setup_same_provider_fallback_can_add_another_credential(tmp_path, monke
             return next(yes_no_answers)
         return False
 
-    monkeypatch.setattr("hermes_cli.main.select_provider_and_model", fake_select)
+    monkeypatch.setattr("drewgent_cli.main.select_provider_and_model", fake_select)
     _stub_tts(monkeypatch)
-    monkeypatch.setattr("hermes_cli.setup.prompt_choice", fake_prompt_choice)
-    monkeypatch.setattr("hermes_cli.setup.prompt_yes_no", fake_prompt_yes_no)
-    monkeypatch.setattr("hermes_cli.setup.prompt", lambda *args, **kwargs: "")
+    monkeypatch.setattr("drewgent_cli.setup.prompt_choice", fake_prompt_choice)
+    monkeypatch.setattr("drewgent_cli.setup.prompt_yes_no", fake_prompt_yes_no)
+    monkeypatch.setattr("drewgent_cli.setup.prompt", lambda *args, **kwargs: "")
     monkeypatch.setattr("agent.credential_pool.load_pool", fake_load_pool)
-    monkeypatch.setattr("hermes_cli.auth_commands.auth_add_command", fake_auth_add_command)
+    monkeypatch.setattr("drewgent_cli.auth_commands.auth_add_command", fake_auth_add_command)
     monkeypatch.setattr("agent.auxiliary_client.get_available_vision_backends", lambda: [])
 
     setup_model_provider(config)
@@ -231,7 +231,7 @@ def test_setup_same_provider_fallback_can_add_another_credential(tmp_path, monke
 
 
 def test_setup_pool_step_shows_manual_vs_auto_detected_counts(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     save_env_value("OPENROUTER_API_KEY", "or-key")
 
@@ -264,11 +264,11 @@ def test_setup_pool_step_shows_manual_vs_auto_detected_counts(tmp_path, monkeypa
             return tts_idx
         return default
 
-    monkeypatch.setattr("hermes_cli.main.select_provider_and_model", fake_select)
+    monkeypatch.setattr("drewgent_cli.main.select_provider_and_model", fake_select)
     _stub_tts(monkeypatch)
-    monkeypatch.setattr("hermes_cli.setup.prompt_choice", fake_prompt_choice)
-    monkeypatch.setattr("hermes_cli.setup.prompt_yes_no", lambda *args, **kwargs: False)
-    monkeypatch.setattr("hermes_cli.setup.prompt", lambda *args, **kwargs: "")
+    monkeypatch.setattr("drewgent_cli.setup.prompt_choice", fake_prompt_choice)
+    monkeypatch.setattr("drewgent_cli.setup.prompt_yes_no", lambda *args, **kwargs: False)
+    monkeypatch.setattr("drewgent_cli.setup.prompt", lambda *args, **kwargs: "")
     monkeypatch.setattr("agent.credential_pool.load_pool", lambda provider: _Pool())
     monkeypatch.setattr("agent.auxiliary_client.get_available_vision_backends", lambda: [])
 
@@ -279,7 +279,7 @@ def test_setup_pool_step_shows_manual_vs_auto_detected_counts(tmp_path, monkeypa
 
 
 def test_setup_copilot_acp_skips_same_provider_pool_step(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
 
     config = load_config()
@@ -301,11 +301,11 @@ def test_setup_copilot_acp_skips_same_provider_pool_step(tmp_path, monkeypatch):
             raise AssertionError("same-provider pool prompt should not appear for copilot-acp")
         return False
 
-    monkeypatch.setattr("hermes_cli.setup.prompt_choice", fake_prompt_choice)
-    monkeypatch.setattr("hermes_cli.setup.prompt_yes_no", fake_prompt_yes_no)
-    monkeypatch.setattr("hermes_cli.setup.prompt", lambda *args, **kwargs: "")
-    monkeypatch.setattr("hermes_cli.auth.get_active_provider", lambda: None)
-    monkeypatch.setattr("hermes_cli.auth.detect_external_credentials", lambda: [])
+    monkeypatch.setattr("drewgent_cli.setup.prompt_choice", fake_prompt_choice)
+    monkeypatch.setattr("drewgent_cli.setup.prompt_yes_no", fake_prompt_yes_no)
+    monkeypatch.setattr("drewgent_cli.setup.prompt", lambda *args, **kwargs: "")
+    monkeypatch.setattr("drewgent_cli.auth.get_active_provider", lambda: None)
+    monkeypatch.setattr("drewgent_cli.auth.detect_external_credentials", lambda: [])
     monkeypatch.setattr("agent.auxiliary_client.get_available_vision_backends", lambda: [])
 
     setup_model_provider(config)
@@ -315,7 +315,7 @@ def test_setup_copilot_acp_skips_same_provider_pool_step(tmp_path, monkeypatch):
 
 def test_setup_copilot_uses_gh_auth_and_saves_provider(tmp_path, monkeypatch):
     """Copilot provider saves correctly through delegation."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     _stub_tts(monkeypatch)
 
@@ -324,7 +324,7 @@ def test_setup_copilot_uses_gh_auth_and_saves_provider(tmp_path, monkeypatch):
     def fake_select():
         _write_model_config("copilot", "https://models.github.ai/inference/v1", "gpt-4o")
 
-    monkeypatch.setattr("hermes_cli.main.select_provider_and_model", fake_select)
+    monkeypatch.setattr("drewgent_cli.main.select_provider_and_model", fake_select)
 
     setup_model_provider(config)
     save_config(config)
@@ -336,7 +336,7 @@ def test_setup_copilot_uses_gh_auth_and_saves_provider(tmp_path, monkeypatch):
 
 def test_setup_copilot_acp_uses_model_picker_and_saves_provider(tmp_path, monkeypatch):
     """Copilot ACP provider saves correctly through delegation."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     _stub_tts(monkeypatch)
 
@@ -345,7 +345,7 @@ def test_setup_copilot_acp_uses_model_picker_and_saves_provider(tmp_path, monkey
     def fake_select():
         _write_model_config("copilot-acp", "", "claude-sonnet-4")
 
-    monkeypatch.setattr("hermes_cli.main.select_provider_and_model", fake_select)
+    monkeypatch.setattr("drewgent_cli.main.select_provider_and_model", fake_select)
 
     setup_model_provider(config)
     save_config(config)
@@ -359,7 +359,7 @@ def test_setup_switch_custom_to_codex_clears_custom_endpoint_and_updates_config(
     tmp_path, monkeypatch
 ):
     """Switching from custom to codex updates config correctly."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     _stub_tts(monkeypatch)
 
@@ -372,7 +372,7 @@ def test_setup_switch_custom_to_codex_clears_custom_endpoint_and_updates_config(
     def fake_select():
         _write_model_config("openai-codex", "https://api.openai.com/v1", "gpt-4o")
 
-    monkeypatch.setattr("hermes_cli.main.select_provider_and_model", fake_select)
+    monkeypatch.setattr("drewgent_cli.main.select_provider_and_model", fake_select)
 
     setup_model_provider(config)
     save_config(config)
@@ -385,7 +385,7 @@ def test_setup_switch_custom_to_codex_clears_custom_endpoint_and_updates_config(
 
 def test_setup_switch_preserves_non_model_config(tmp_path, monkeypatch):
     """Provider switch preserves other config sections (terminal, display, etc.)."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     _stub_tts(monkeypatch)
 
@@ -398,7 +398,7 @@ def test_setup_switch_preserves_non_model_config(tmp_path, monkeypatch):
     def fake_select():
         _write_model_config("openrouter", model_name="gpt-4o")
 
-    monkeypatch.setattr("hermes_cli.main.select_provider_and_model", fake_select)
+    monkeypatch.setattr("drewgent_cli.main.select_provider_and_model", fake_select)
 
     setup_model_provider(config)
     save_config(config)
@@ -409,7 +409,7 @@ def test_setup_switch_preserves_non_model_config(tmp_path, monkeypatch):
 
 
 def test_setup_summary_marks_anthropic_auth_as_vision_available(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-key")
     monkeypatch.setattr("shutil.which", lambda _name: None)
@@ -419,14 +419,14 @@ def test_setup_summary_marks_anthropic_auth_as_vision_available(tmp_path, monkey
     output = capsys.readouterr().out
 
     assert "Vision (image analysis)" in output
-    assert "missing run 'hermes setup' to configure" not in output
+    assert "missing run 'drewgent setup' to configure" not in output
 
 
 def test_setup_summary_shows_camofox_when_browser_feature_is_camofox(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     monkeypatch.setattr(
-        "hermes_cli.setup.get_nous_subscription_features",
+        "drewgent_cli.setup.get_nous_subscription_features",
         lambda config: NousSubscriptionFeatures(
             subscribed=False,
             nous_auth_present=False,
@@ -449,11 +449,11 @@ def test_setup_summary_shows_camofox_when_browser_feature_is_camofox(tmp_path, m
 
 
 def test_setup_summary_does_not_mark_incomplete_browserbase_as_available(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DREW_HOME", str(tmp_path))
     _clear_provider_env(monkeypatch)
     monkeypatch.setenv("BROWSERBASE_API_KEY", "bb-key")
     monkeypatch.setattr(
-        "hermes_cli.setup.get_nous_subscription_features",
+        "drewgent_cli.setup.get_nous_subscription_features",
         lambda config: NousSubscriptionFeatures(
             subscribed=False,
             nous_auth_present=False,

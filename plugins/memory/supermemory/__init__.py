@@ -21,7 +21,7 @@ from agent.memory_provider import MemoryProvider
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CONTAINER_TAG = "hermes"
+_DEFAULT_CONTAINER_TAG = "drewgent"
 _DEFAULT_MAX_RECALL_RESULTS = 10
 _DEFAULT_PROFILE_FREQUENCY = 50
 _DEFAULT_CAPTURE_MODE = "all"
@@ -88,9 +88,9 @@ def _as_bool(value: Any, default: bool) -> bool:
     return default
 
 
-def _load_supermemory_config(hermes_home: str) -> dict:
+def _load_supermemory_config(drewgent_home: str) -> dict:
     config = _default_config()
-    config_path = Path(hermes_home) / "supermemory.json"
+    config_path = Path(drewgent_home) / "supermemory.json"
     if config_path.exists():
         try:
             raw = json.loads(config_path.read_text(encoding="utf-8"))
@@ -119,8 +119,8 @@ def _load_supermemory_config(hermes_home: str) -> dict:
     return config
 
 
-def _save_supermemory_config(values: dict, hermes_home: str) -> None:
-    config_path = Path(hermes_home) / "supermemory.json"
+def _save_supermemory_config(values: dict, drewgent_home: str) -> None:
+    config_path = Path(drewgent_home) / "supermemory.json"
     existing = {}
     if config_path.exists():
         try:
@@ -399,7 +399,7 @@ class SupermemoryMemoryProvider(MemoryProvider):
         self._capture_mode = _DEFAULT_CAPTURE_MODE
         self._entity_context = _DEFAULT_ENTITY_CONTEXT
         self._api_timeout = _DEFAULT_API_TIMEOUT
-        self._hermes_home = ""
+        self._drewgent_home = ""
         self._write_enabled = True
         self._active = False
 
@@ -430,20 +430,20 @@ class SupermemoryMemoryProvider(MemoryProvider):
             {"key": "api_timeout", "description": "Timeout in seconds for SDK and ingest calls", "default": str(_DEFAULT_API_TIMEOUT)},
         ]
 
-    def save_config(self, values, hermes_home):
+    def save_config(self, values, drewgent_home):
         sanitized = dict(values or {})
         if "container_tag" in sanitized:
             sanitized["container_tag"] = _sanitize_tag(str(sanitized["container_tag"]))
         if "entity_context" in sanitized:
             sanitized["entity_context"] = _clamp_entity_context(str(sanitized["entity_context"]))
-        _save_supermemory_config(sanitized, hermes_home)
+        _save_supermemory_config(sanitized, drewgent_home)
 
     def initialize(self, session_id: str, **kwargs) -> None:
-        from hermes_constants import get_hermes_home
-        self._hermes_home = kwargs.get("hermes_home") or str(get_hermes_home())
+        from drewgent_constants import get_drewgent_home
+        self._drewgent_home = kwargs.get("drewgent_home") or str(get_drewgent_home())
         self._session_id = session_id
         self._turn_count = 0
-        self._config = _load_supermemory_config(self._hermes_home)
+        self._config = _load_supermemory_config(self._drewgent_home)
         self._api_key = os.environ.get("SUPERMEMORY_API_KEY", "")
         self._container_tag = self._config["container_tag"]
         self._auto_recall = self._config["auto_recall"]
@@ -516,7 +516,7 @@ class SupermemoryMemoryProvider(MemoryProvider):
             f"[role: user]\n{clean_user}\n[user:end]\n\n"
             f"[role: assistant]\n{clean_assistant}\n[assistant:end]"
         )
-        metadata = {"source": "hermes", "type": "conversation_turn"}
+        metadata = {"source": "drewgent", "type": "conversation_turn"}
 
         def _run():
             try:
@@ -562,7 +562,7 @@ class SupermemoryMemoryProvider(MemoryProvider):
             try:
                 self._client.add_memory(
                     content.strip(),
-                    metadata={"source": "hermes_memory", "target": target, "type": "explicit_memory"},
+                    metadata={"source": "drewgent_memory", "target": target, "type": "explicit_memory"},
                     entity_context=self._entity_context,
                 )
             except Exception:
@@ -592,7 +592,7 @@ class SupermemoryMemoryProvider(MemoryProvider):
         if not isinstance(metadata, dict):
             metadata = {}
         metadata.setdefault("type", _detect_category(content))
-        metadata["source"] = "hermes_tool"
+        metadata["source"] = "drewgent_tool"
         try:
             result = self._client.add_memory(content, metadata=metadata, entity_context=self._entity_context)
             preview = content[:80] + ("..." if len(content) > 80 else "")
