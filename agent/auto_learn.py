@@ -10,12 +10,17 @@ Output is in Karpathy's LLM Wiki / Obsidian-compatible Markdown format:
 - Wikilinks for cross-references
 - Tags for Dataview queries
 - Daily log for chronological tracking
+- Semantic search via MiniMax embeddings (or local fallback)
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import math
+import os
 import re
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Set, List, Tuple, Optional
@@ -68,6 +73,168 @@ INSIGHT_TAGS = {
     "tool": ["environment", "tool"],
     "project": ["environment", "project"],
 }
+
+
+# ---------------------------------------------------------------------------
+# MiniMax Embeddings API
+# ---------------------------------------------------------------------------
+
+
+def get_minimax_embedding(texts: list[str]) -> Optional[list[list[float]]]:
+    """Get embeddings from MiniMax API.
+
+    Requires MINIMAX_API_KEY environment variable.
+    Uses the emb-01 model.
+
+    Returns list of embedding vectors or None if API unavailable.
+    """
+    api_key = os.getenv("MINIMAX_API_KEY")
+    if not api_key:
+        logger.debug("MINIMAX_API_KEY not set, semantic search unavailable")
+        return None
+
+    try:
+        import urllib.request
+
+        url = "https://api.minimax.io/v1/embeddings"
+        payload = json.dumps(
+            {
+                "model": "embo-01",
+                "input": texts,
+            }
+        ).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            return [item["embedding"] for item in result["data"]]
+
+    except Exception as e:
+        logger.debug(f"MiniMax embeddings API failed: {e}")
+        return None
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+# ---------------------------------------------------------------------------
+# Vector Store (SQLite-based)
+# ---------------------------------------------------------------------------
+
+
+class VectorStore:
+    """Lightweight vector store using SQLite + JSON embeddings."""
+
+    def __init__(self, db_path: Path):
+        self._db_path = db_path
+        self._ensure_db()
+
+    def _ensure_db(self) -> None:
+        """Create tables if not exist."""
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self._db_path))
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS vectors (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                embedding TEXT NOT NULL,
+                itype TEXT,
+                target TEXT,
+                created_at TEXT
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def add(
+        self,
+        id: str,
+        content: str,
+        embedding: list[float],
+        itype: str = "",
+        target: str = "",
+    ) -> bool:
+        """Add an embedding to the store."""
+        try:
+            conn = sqlite3.connect(str(self._db_path))
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO vectors (id, content, embedding, itype, target, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    id,
+                    content,
+                    json.dumps(embedding),
+                    itype,
+                    target,
+                    datetime.now().isoformat(),
+                ),
+            )
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            logger.debug(f"VectorStore add failed: {e}")
+            return False
+
+    def search(self, query_embedding: list[float], limit: int = 5) -> list[dict]:
+        """Search for most similar vectors."""
+        try:
+            conn = sqlite3.connect(str(self._db_path))
+            cursor = conn.execute(
+                "SELECT id, content, embedding, itype, target FROM vectors"
+            )
+            rows = cursor.fetchall()
+            conn.close()
+
+            results = []
+            for row in rows:
+                stored_embedding = json.loads(row[2])
+                score = cosine_similarity(query_embedding, stored_embedding)
+                results.append(
+                    {
+                        "id": row[0],
+                        "content": row[1],
+                        "score": score,
+                        "itype": row[3],
+                        "target": row[4],
+                    }
+                )
+
+            results.sort(key=lambda x: x["score"], reverse=True)
+            return results[:limit]
+
+        except Exception as e:
+            logger.debug(f"VectorStore search failed: {e}")
+            return []
+
+    def count(self) -> int:
+        """Return total number of stored embeddings."""
+        try:
+            conn = sqlite3.connect(str(self._db_path))
+            cursor = conn.execute("SELECT COUNT(*) FROM vectors")
+            count = cursor.fetchone()[0]
+            conn.close()
+            return count
+        except Exception:
+            return 0
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +630,8 @@ class AutoLearner:
 
     Tracks learned facts to avoid duplicates. Outputs to Karpathy's LLM Wiki
     format with proper Obsidian frontmatter, tags, and wikilinks.
+
+    Supports semantic search via MiniMax embeddings (when MINIMAX_API_KEY is set).
     """
 
     def __init__(
@@ -470,11 +639,14 @@ class AutoLearner:
         wiki_path: Optional[Path] = None,
         enabled: bool = False,
         max_per_turn: int = 2,
+        semantic_search: bool = True,
     ):
         self._enabled = enabled
         self._max_per_turn = max_per_turn
         self._wiki_path = wiki_path
         self._writer: Optional[ObsidianWriter] = None
+        self._vector_store: Optional[VectorStore] = None
+        self._semantic_search_enabled = semantic_search
 
         # Track what's already learned to avoid duplicates
         self._learned: Set[str] = set()
@@ -485,6 +657,15 @@ class AutoLearner:
         self._enabled = True
         self._wiki_path = wiki_path
         self._writer = ObsidianWriter(wiki_path)
+
+        # Initialize vector store for semantic search
+        if self._semantic_search_enabled:
+            db_path = wiki_path / "vectors.db"
+            self._vector_store = VectorStore(db_path)
+            logger.debug(
+                f"VectorStore initialized at {db_path} ({self._vector_store.count()} vectors)"
+            )
+
         self._load_existing(wiki_path)
 
     def _load_existing(self, wiki_path: Path) -> None:
@@ -685,7 +866,62 @@ class AutoLearner:
             return False
 
         try:
-            return self._writer.write_insight(insight)
+            # Write to Obsidian wiki
+            success = self._writer.write_insight(insight)
+
+            # Also store embedding for semantic search
+            if success and self._vector_store:
+                self._store_embedding(insight)
+
+            return success
         except Exception as e:
             logger.debug("AutoLearn: failed to save insight: %s", e)
             return False
+
+    def _store_embedding(self, insight: Insight) -> None:
+        """Store embedding for semantic search."""
+        embedding = get_minimax_embedding([insight.content])
+        if embedding:
+            # Generate unique ID
+            insight_id = f"{insight.itype}_{insight.content[:30].replace(' ', '_')}"
+            self._vector_store.add(
+                id=insight_id,
+                content=insight.content,
+                embedding=embedding[0],
+                itype=insight.itype,
+                target=insight.target,
+            )
+            logger.debug(f"Stored embedding for: {insight.content[:50]}")
+
+    def semantic_search(self, query: str, limit: int = 5) -> list[dict]:
+        """Search memories semantically using MiniMax embeddings.
+
+        Args:
+            query: Search query text
+            limit: Maximum number of results
+
+        Returns:
+            List of dicts with content, score, itype, target
+        """
+        if not self._vector_store:
+            return []
+
+        # Get query embedding
+        embeddings = get_minimax_embedding([query])
+        if not embeddings:
+            logger.debug("Semantic search failed: could not get embeddings")
+            return []
+
+        # Search vector store
+        results = self._vector_store.search(embeddings[0], limit=limit)
+
+        # Format results
+        return [
+            {
+                "content": r["content"],
+                "score": r["score"],
+                "type": r["itype"],
+                "target": r["target"],
+            }
+            for r in results
+        ]
