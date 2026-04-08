@@ -77,6 +77,7 @@ from drewgent_constants import OPENROUTER_BASE_URL
 
 # Agent internals extracted to agent/ package for modularity
 from agent.memory_manager import build_memory_context_block
+from agent.auto_learn import AutoLearner
 from agent.prompt_builder import (
     DEFAULT_AGENT_IDENTITY, PLATFORM_HINTS,
     MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE,
@@ -1022,6 +1023,7 @@ class AIAgent:
 
         # Persistent memory (MEMORY.md + USER.md) -- loaded from disk
         self._memory_store = None
+        self._auto_learner = None  # Auto-learning instance
         self._memory_enabled = False
         self._user_profile_enabled = False
         self._memory_nudge_interval = 10
@@ -1042,9 +1044,23 @@ class AIAgent:
                         user_char_limit=mem_config.get("user_char_limit", 1375),
                     )
                     self._memory_store.load_from_disk()
+
+                    # Auto-learning: extract patterns from conversations automatically
+                    _auto_learn_enabled = mem_config.get("auto_learn", True)
+                    if _auto_learn_enabled:
+                        _auto_learn_max = int(mem_config.get("auto_learn_max_per_turn", 2))
+                        self._auto_learner = AutoLearner(
+                            memory_store=self._memory_store,
+                            enabled=True,
+                            max_per_turn=_auto_learn_max,
+                        )
+                        # Load existing facts to avoid duplicates
+                        from drewgent_constants import get_drewgent_home
+                        _drewgent_home = get_drewgent_home()
+                        self._auto_learner.enable(_drewgent_home / "memories")
             except Exception:
                 pass  # Memory is optional -- don't break agent init
-        
+
 
 
         # Memory provider plugin (external — one at a time, alongside built-in)
@@ -9152,6 +9168,13 @@ class AIAgent:
                 self._memory_manager.queue_prefetch_all(original_user_message)
             except Exception:
                 pass
+
+        # Auto-learning: extract patterns from conversation automatically
+        if self._auto_learner and final_response and original_user_message:
+            try:
+                self._auto_learner.learn_from_turn(original_user_message, final_response)
+            except Exception:
+                pass  # Auto-learn is best-effort
 
         # Background memory/skill review — runs AFTER the response is delivered
         # so it never competes with the user's task for model attention.
