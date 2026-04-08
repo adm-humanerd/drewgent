@@ -159,6 +159,81 @@ python -m pytest tests/ -q
 
 ---
 
+## Customization Guide
+
+### Clone & Modify
+
+```bash
+git clone https://github.com/adm-humanerd/drewgent.git
+cd drewgent
+pip install -e .
+```
+
+### Add New Tools
+
+Create a new file in `tools/` (e.g., `tools/my_tool.py`):
+
+```python
+from tools.registry import registry
+
+def my_tool(message: str, task_id: str = None) -> str:
+    return f"Result: {message}"
+
+registry.register(
+    name="my_tool",
+    toolset="custom",
+    schema={
+        "name": "my_tool",
+        "description": "My custom tool",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "description": "Input message"}
+            },
+            "required": ["message"]
+        }
+    },
+    handler=lambda args, **kw: my_tool(**args, **kw),
+)
+```
+
+Then add the tool to `toolsets.py` in `_HERMES_CORE_TOOLS` or your custom toolset.
+
+### Change Appearance (Skins)
+
+```bash
+/hermes skin ares  # crimson/bronze theme
+/hermes skin mono  # grayscale theme
+/hermes skin slate # blue developer theme
+/hermes skin default  # classic gold theme
+```
+
+### Directory Structure
+
+```
+~/.drewgent/           # User config & data
+├── config.yaml        # Main config
+├── .env               # API keys
+├── memories/          # Persistent memory
+├── skills/            # Custom skills
+└── skins/             # Custom skins (YAML)
+
+drewgent-agent/
+├── tools/             # Tool implementations
+├── drewgent_cli/        # CLI commands
+├── gateway/           # Messaging platforms
+├── agent/             # Core agent logic
+└── skills/            # Built-in skills
+```
+
+### Enable/Disable Tools
+
+```bash
+hermes tools  # Interactive tool selection
+```
+
+---
+
 ## Community
 
 - 💬 [Discord](https://discord.gg/NousResearch)
