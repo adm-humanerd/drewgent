@@ -76,21 +76,23 @@ INSIGHT_TAGS = {
 
 
 # ---------------------------------------------------------------------------
-# MiniMax Embeddings API
+# Embeddings Provider (MiniMax API → Ollama fallback)
 # ---------------------------------------------------------------------------
+
+# Priority: MiniMax API (if key + working) → Ollama (local) → None
 
 
 def get_minimax_embedding(texts: list[str]) -> Optional[list[list[float]]]:
     """Get embeddings from MiniMax API.
 
     Requires MINIMAX_API_KEY environment variable.
-    Uses the emb-01 model.
+    Uses the emb-01 model with "texts" parameter.
 
     Returns list of embedding vectors or None if API unavailable.
     """
     api_key = os.getenv("MINIMAX_API_KEY")
     if not api_key:
-        logger.debug("MINIMAX_API_KEY not set, semantic search unavailable")
+        logger.debug("MINIMAX_API_KEY not set")
         return None
 
     try:
@@ -100,7 +102,7 @@ def get_minimax_embedding(texts: list[str]) -> Optional[list[list[float]]]:
         payload = json.dumps(
             {
                 "model": "embo-01",
-                "input": texts,
+                "texts": texts,  # MiniMax uses "texts" not "input"
             }
         ).encode("utf-8")
 
@@ -116,11 +118,89 @@ def get_minimax_embedding(texts: list[str]) -> Optional[list[list[float]]]:
 
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read().decode("utf-8"))
-            return [item["embedding"] for item in result["data"]]
+            # MiniMax returns {"vectors": [...]} not {"data": [...]}
+            if result.get("vectors"):
+                return result["vectors"]
+            logger.debug(f"MiniMax returned no vectors: {result}")
+            return None
 
     except Exception as e:
         logger.debug(f"MiniMax embeddings API failed: {e}")
         return None
+
+
+def get_ollama_embedding(
+    texts: list[str], model: str = "nomic-embed-text"
+) -> Optional[list[list[float]]]:
+    """Get embeddings from local Ollama server.
+
+    Requires Ollama server running (localhost:11434).
+    Falls back to qwen2.5:latest if nomic-embed-text not available.
+
+    Returns list of embedding vectors or None if Ollama unavailable.
+    """
+    try:
+        import urllib.request
+
+        url = "http://localhost:11434/api/embeddings"
+
+        # Try nomic-embed-text first, fallback to qwen2.5:latest
+        for model_name in [model, "qwen2.5:latest"]:
+            try:
+                payload = json.dumps(
+                    {
+                        "model": model_name,
+                        "prompt": texts[0] if texts else "",
+                    }
+                ).encode("utf-8")
+
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    result = json.loads(resp.read().decode("utf-8"))
+                    if "embedding" in result:
+                        return [result["embedding"]]
+                    # Ollama returns {"embedding": [...]} for single text
+                    if "embeddings" in result:
+                        return result["embeddings"]
+
+            except Exception:
+                continue
+
+        logger.debug("Ollama: no working embedding model found")
+        return None
+
+    except Exception as e:
+        logger.debug(f"Ollama embeddings failed: {e}")
+        return None
+
+
+def get_embedding(texts: list[str]) -> Optional[list[list[float]]]:
+    """Get embeddings with automatic provider selection.
+
+    Priority: MiniMax API → Ollama (local) → None
+
+    Returns list of embedding vectors or None if all providers fail.
+    """
+    # Try MiniMax first
+    result = get_minimax_embedding(texts)
+    if result:
+        logger.debug(f"Using MiniMax embeddings ({len(result)} vectors)")
+        return result
+
+    # Fall back to Ollama
+    result = get_ollama_embedding(texts)
+    if result:
+        logger.debug(f"Using Ollama embeddings ({len(result)} vectors)")
+        return result
+
+    logger.debug("No embedding provider available")
+    return None
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -880,7 +960,7 @@ class AutoLearner:
 
     def _store_embedding(self, insight: Insight) -> None:
         """Store embedding for semantic search."""
-        embedding = get_minimax_embedding([insight.content])
+        embedding = get_embedding([insight.content])
         if embedding:
             # Generate unique ID
             insight_id = f"{insight.itype}_{insight.content[:30].replace(' ', '_')}"
@@ -894,7 +974,9 @@ class AutoLearner:
             logger.debug(f"Stored embedding for: {insight.content[:50]}")
 
     def semantic_search(self, query: str, limit: int = 5) -> list[dict]:
-        """Search memories semantically using MiniMax embeddings.
+        """Search memories semantically using embeddings.
+
+        Uses MiniMax API (if available) or Ollama (local) automatically.
 
         Args:
             query: Search query text
@@ -907,7 +989,7 @@ class AutoLearner:
             return []
 
         # Get query embedding
-        embeddings = get_minimax_embedding([query])
+        embeddings = get_embedding([query])
         if not embeddings:
             logger.debug("Semantic search failed: could not get embeddings")
             return []
