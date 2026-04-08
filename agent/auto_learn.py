@@ -18,7 +18,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Set, List, Tuple, Optional, Dict
+from typing import Set, List, Tuple, Optional
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -357,10 +357,6 @@ updated: {today}
         content = insight.content.strip()
         itype = insight.itype.replace("_", "-")
 
-        # Create a wikilink to self for cross-reference
-        folder, filename = insight.get_wiki_category()
-        self_link = f"[[{folder}/{filename}]]"
-
         # Context if available
         context_str = ""
         if insight.context:
@@ -384,24 +380,18 @@ updated: {today}
             content = log_path.read_text(encoding="utf-8")
             # Check if already logged today
             if f"## {today}" in content:
-                # Append to existing day
+                # Find today's section boundaries
                 marker = f"## {today}"
                 idx = content.find(marker)
-                # Find next ## or end
                 next_marker = content.find("\n## ", idx + 1)
-                if next_marker > 0:
-                    section = content[idx:next_marker]
-                else:
-                    section = content[idx:]
-                # Check if this insight is already in
-                if insight.content[:30] not in section:
-                    # Add to section
+                section_end = next_marker if next_marker > 0 else len(content)
+
+                # Check if this insight is already in today's section
+                today_section = content[idx:section_end]
+                if insight.content not in today_section:
+                    # Append to today's section
                     entry = f"- {tag_str} {insight.content}\n"
-                    content = (
-                        content[: next_marker if next_marker > 0 else len(content)]
-                        + entry
-                        + content[next_marker if next_marker > 0 else len(content) :]
-                    )
+                    content = content[:section_end] + entry + content[section_end:]
             else:
                 # Add new day section
                 content += f"\n## {today}\n\n- {tag_str} {insight.content}\n"
@@ -541,16 +531,21 @@ class AutoLearner:
         # Limit per turn
         insights = insights[: self._max_per_turn]
 
-        saved = 0
+        user_saved = 0
+        memory_saved = 0
         for insight in insights:
             if self._save_insight(insight):
-                saved += 1
+                if insight.target == "user":
+                    user_saved += 1
+                else:
+                    memory_saved += 1
 
-        if saved > 0:
+        total_saved = user_saved + memory_saved
+        if total_saved > 0:
             logger.debug(
                 "AutoLearn turn %d: saved %d insights to Obsidian wiki",
                 self._turn_count,
-                saved,
+                total_saved,
             )
             # Update index after saving
             try:
@@ -558,7 +553,7 @@ class AutoLearner:
             except Exception:
                 pass
 
-        return saved, saved  # Return same for both counts
+        return user_saved, memory_saved
 
     def _extract_insights(self, user_text: str, assistant_text: str) -> List[Insight]:
         """Extract insights from conversation text."""
