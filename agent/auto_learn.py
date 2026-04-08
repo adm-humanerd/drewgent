@@ -1,27 +1,77 @@
-"""AutoLearning Module - Automatic Pattern Extraction from Conversations
+"""AutoLearning Module - Automatic Pattern Extraction to Obsidian Wiki
 
 This module provides automatic learning capabilities that extract:
 - User preferences and communication style
 - Environmental facts and tool preferences
 - Interaction patterns and corrections
 
-Integrated with AIAgent to enable proactive memory building without
-requiring manual memory tool calls.
+Output is in Karpathy's LLM Wiki / Obsidian-compatible Markdown format:
+- Individual markdown files with YAML frontmatter
+- Wikilinks for cross-references
+- Tags for Dataview queries
+- Daily log for chronological tracking
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
-from typing import Set, List, Tuple, Optional
-from dataclasses import dataclass
+from typing import Set, List, Tuple, Optional, Dict
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Pattern Definitions
+# Obsidian Wiki Structure
+# ---------------------------------------------------------------------------
+
+WIKI_STRUCTURE = {
+    "entities": "entities",
+    "concepts": "concepts",
+    "insights_log": "insights",
+}
+
+
+# ---------------------------------------------------------------------------
+# Insight Types -> Wiki Categories
+# ---------------------------------------------------------------------------
+
+INSIGHT_CATEGORIES = {
+    "preference": ("entities", "preferences"),
+    "name": ("entities", "user-profile"),
+    "role": ("entities", "user-profile"),
+    "field": ("entities", "user-profile"),
+    "timezone": ("entities", "user-profile"),
+    "style_concise": ("entities", "communication-style"),
+    "style_detailed": ("entities", "communication-style"),
+    "correction": ("entities", "corrections"),
+    "anti_preference": ("entities", "preferences"),
+    "os": ("entities", "environment"),
+    "tool": ("entities", "environment"),
+    "project": ("entities", "environment"),
+}
+
+INSIGHT_TAGS = {
+    "preference": ["user", "preference"],
+    "name": ["user", "identity"],
+    "role": ["user", "identity"],
+    "field": ["user", "identity"],
+    "timezone": ["user", "identity"],
+    "style_concise": ["user", "communication"],
+    "style_detailed": ["user", "communication"],
+    "correction": ["user", "correction"],
+    "anti_preference": ["user", "preference"],
+    "os": ["environment", "os"],
+    "tool": ["environment", "tool"],
+    "project": ["environment", "project"],
+}
+
+
+# ---------------------------------------------------------------------------
+# Insight Dataclass
 # ---------------------------------------------------------------------------
 
 
@@ -30,42 +80,24 @@ class Insight:
     """A single insight extracted from conversation."""
 
     target: str  # "user" or "memory"
-    itype: str  # insight type (preference, name, style, etc.)
+    itype: str  # insight type
     content: str
     context: str = ""
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
-    def format(self) -> str:
-        """Format for storage in USER.md or MEMORY.md."""
-        if self.target == "user":
-            return self._format_user()
-        return self._format_memory()
+    def get_wiki_category(self) -> Tuple[str, str]:
+        """Get (folder, filename) for wiki storage."""
+        cats = INSIGHT_CATEGORIES.get(self.itype, ("entities", "general"))
+        return cats[0], cats[1]
 
-    def _format_user(self) -> str:
-        """Format user insight."""
-        labels = {
-            "preference": "Preference",
-            "name": "Name",
-            "role": "Role",
-            "field": "Field",
-            "timezone": "Timezone",
-            "style_concise": "Communication preference",
-            "style_detailed": "Communication preference",
-            "correction": "Corrected approach",
-            "anti_preference": "Dislikes",
-        }
-        label = labels.get(self.itype, "Known")
-        return f"{label}: {self.content}"
+    def get_tags(self) -> List[str]:
+        """Get Obsidian tags for this insight."""
+        return INSIGHT_TAGS.get(self.itype, ["insight", "general"])
 
-    def _format_memory(self) -> str:
-        """Format memory insight."""
-        labels = {
-            "os": "Environment",
-            "tool": "Using tool",
-            "project": "Project fact",
-        }
-        label = labels.get(self.itype, "Fact")
-        return f"{label}: {self.content}"
 
+# ---------------------------------------------------------------------------
+# Pattern Definitions
+# ---------------------------------------------------------------------------
 
 # User preference patterns
 _USER_PATTERNS = [
@@ -92,7 +124,7 @@ _STYLE_PATTERNS = [
     ),
 ]
 
-# Correction patterns (user correcting agent)
+# Correction patterns
 _CORRECTION_PATTERNS = [
     (r"(?:no[, ]|actually[,]|not quite)[:\s]+([^.!?]+)", "correction"),
     (r"(?:that's wrong|incorrect|I meant)[:\s]+([^.!?]+)", "correction"),
@@ -107,54 +139,388 @@ _ENV_PATTERNS = [
     (r"(?:using|with)[:\s]+([A-Za-z][^.\s]+?)(?:\s|$|\.|\,)", "tool"),
 ]
 
-# Generic negative patterns
+# Anti-preference patterns
 _ANTI_PATTERNS = [
     (r"(?:don't|not)[:\s]+([A-Za-z][^.!?]+)", "anti_preference"),
 ]
 
 
+# ---------------------------------------------------------------------------
+# Obsidian Wiki Writer
+# ---------------------------------------------------------------------------
+
+
+class ObsidianWriter:
+    """Writes insights to Obsidian wiki format."""
+
+    def __init__(self, wiki_path: Path):
+        self._wiki_path = wiki_path
+        self._ensure_structure()
+
+    def _ensure_structure(self) -> None:
+        """Create wiki directory structure if it doesn't exist."""
+        self._wiki_path.mkdir(parents=True, exist_ok=True)
+        for folder in WIKI_STRUCTURE.values():
+            (self._wiki_path / folder).mkdir(parents=True, exist_ok=True)
+
+        # Create SCHEMA.md if not exists
+        schema_path = self._wiki_path / "SCHEMA.md"
+        if not schema_path.exists():
+            self._write_schema(schema_path)
+
+        # Create index.md if not exists
+        index_path = self._wiki_path / "index.md"
+        if not index_path.exists():
+            self._write_index(index_path)
+
+    def _write_schema(self, path: Path) -> None:
+        """Write SCHEMA.md with wiki conventions."""
+        content = """---
+title: SCHEMA
+tags: [meta, wiki]
+---
+
+# Wiki Schema
+
+This is a [[Karpathy LLM Wiki]] - a persistent, compounding knowledge base.
+
+## Structure
+
+- [[entities/]] - Entity pages (people, preferences, environment)
+- [[concepts/]] - Concept pages (ideas, patterns)
+- [[insights/]] - Daily insight logs
+
+## Conventions
+
+### Tags
+- `#user` - User-related facts
+- `#preference` - User preferences
+- `#identity` - User identity
+- `#communication` - Communication style
+- `#correction` - Corrections made
+- `#environment` - Technical environment
+- `#insight` - Automatically extracted insights
+
+### Wikilinks
+- Use `[[pagename]]` for internal links
+- Use `[[pagename#section|alias]]` for section links
+- Use `[[pagename^anchor]]` for block references
+
+### Frontmatter
+Every page should have:
+```yaml
+---
+tags: [...]
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+---
+```
+
+## Updating Pages
+
+1. Add new content to relevant entity page
+2. Update the Log section with timestamp
+3. Index is auto-updated; verify monthly
+
+---
+*Auto-generated by Drewgent Auto-Learning*
+"""
+        path.write_text(content, encoding="utf-8")
+
+    def _write_index(self, path: Path) -> None:
+        """Write index.md."""
+        content = """---
+title: Index
+tags: [meta, wiki]
+---
+
+# Wiki Index
+
+Auto-generated table of contents for the knowledge base.
+
+## Entities
+- [[entities/preferences]] - User preferences
+- [[entities/user-profile]] - User identity
+- [[entities/environment]] - Technical environment
+- [[entities/communication-style]] - Communication preferences
+- [[entities/corrections]] - Past corrections
+
+## Concepts
+- (Add concept pages here as they emerge)
+
+## Daily Logs
+- [[insights/YYYY-MM]] - Monthly insight logs
+"""
+        content = content.replace("YYYY-MM", datetime.now().strftime("%Y-%m"))
+        path.write_text(content, encoding="utf-8")
+
+    def write_insight(self, insight: Insight) -> bool:
+        """Write an insight to the appropriate wiki page."""
+        try:
+            folder, filename = insight.get_wiki_category()
+            page_path = self._wiki_path / folder / f"{filename}.md"
+
+            # Read existing content or create new
+            if page_path.exists():
+                content = page_path.read_text(encoding="utf-8")
+            else:
+                content = self._create_new_page(filename, insight.get_tags())
+
+            # Add insight to page
+            updated_content = self._add_insight_to_page(content, insight)
+            page_path.write_text(updated_content, encoding="utf-8")
+
+            # Also append to daily log
+            self._append_to_daily_log(insight)
+
+            return True
+        except Exception as e:
+            logger.debug("ObsidianWriter: failed to write insight: %s", e)
+            return False
+
+    def _create_new_page(self, filename: str, tags: List[str]) -> str:
+        """Create a new wiki page with frontmatter."""
+        title = filename.replace("-", " ").title()
+        today = datetime.now().strftime("%Y-%m-%d")
+        tag_str = ", ".join(f'"{t}"' for t in tags)
+
+        return f"""---
+title: {title}
+tags: [{tag_str}]
+created: {today}
+updated: {today}
+---
+
+# {title}
+
+## Known Facts
+
+
+
+## Log
+
+- {today}: Initial entry created
+---
+
+*Auto-generated by Drewgent Auto-Learning*
+"""
+
+    def _add_insight_to_page(self, content: str, insight: Insight) -> str:
+        """Add an insight to an existing page."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        tags = insight.get_tags()
+        tag_str = ", ".join(f"#{t}" for t in tags)
+
+        # Format the insight entry
+        insight_entry = self._format_insight_entry(insight, today, tag_str)
+
+        # Find insertion point - before the footer or at end
+        footer_marker = "\n---\n*Auto-generated"
+        if footer_marker in content:
+            parts = content.split(footer_marker)
+            # Insert before footer, after "Log" section
+            log_marker = "## Log"
+            if log_marker in parts[0]:
+                log_parts = parts[0].split(log_marker)
+                if len(log_parts) > 1:
+                    # Insert at end of log section
+                    log_content = log_parts[1]
+                    lines = log_content.strip().split("\n")
+                    # Find where log entries end
+                    insert_idx = len(lines)
+                    for i, line in enumerate(lines):
+                        if line.startswith("---") or line.startswith("*Auto"):
+                            insert_idx = i
+                            break
+                    new_log_lines = (
+                        lines[:insert_idx] + [insight_entry] + lines[insert_idx:]
+                    )
+                    parts[0] = log_marker.join([log_parts[0], "\n".join(new_log_lines)])
+                else:
+                    parts[0] += "\n\n## Log\n\n" + insight_entry
+            else:
+                parts[0] += f"\n\n## Log\n\n{insight_entry}\n"
+            content = footer_marker.join(parts)
+        else:
+            # No footer, just append
+            content += f"\n\n{insight_entry}\n"
+
+        # Update the "updated" frontmatter
+        content = re.sub(
+            r"^updated: .+$", f"updated: {today}", content, flags=re.MULTILINE
+        )
+
+        return content
+
+    def _format_insight_entry(self, insight: Insight, today: str, tag_str: str) -> str:
+        """Format an insight as a wiki entry."""
+        content = insight.content.strip()
+        itype = insight.itype.replace("_", "-")
+
+        # Create a wikilink to self for cross-reference
+        folder, filename = insight.get_wiki_category()
+        self_link = f"[[{folder}/{filename}]]"
+
+        # Context if available
+        context_str = ""
+        if insight.context:
+            context_str = f" *(context: {insight.context[:50]}...)*"
+
+        return f"- {today}: {tag_str} {content}{context_str} ^{itype}-{today.replace('-', '')}"
+
+    def _append_to_daily_log(self, insight: Insight) -> None:
+        """Append insight to daily log file."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        month = datetime.now().strftime("%Y-%m")
+        tags = insight.get_tags()
+        tag_str = ", ".join(f"#{t}" for t in tags)
+
+        log_dir = self._wiki_path / WIKI_STRUCTURE["insights_log"]
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        log_path = log_dir / f"{month}.md"
+
+        if log_path.exists():
+            content = log_path.read_text(encoding="utf-8")
+            # Check if already logged today
+            if f"## {today}" in content:
+                # Append to existing day
+                marker = f"## {today}"
+                idx = content.find(marker)
+                # Find next ## or end
+                next_marker = content.find("\n## ", idx + 1)
+                if next_marker > 0:
+                    section = content[idx:next_marker]
+                else:
+                    section = content[idx:]
+                # Check if this insight is already in
+                if insight.content[:30] not in section:
+                    # Add to section
+                    entry = f"- {tag_str} {insight.content}\n"
+                    content = (
+                        content[: next_marker if next_marker > 0 else len(content)]
+                        + entry
+                        + content[next_marker if next_marker > 0 else len(content) :]
+                    )
+            else:
+                # Add new day section
+                content += f"\n## {today}\n\n- {tag_str} {insight.content}\n"
+        else:
+            # Create monthly log
+            content = f"""---
+title: Insights {month}
+tags: [insights, log]
+created: {month}-01
+updated: {today}
+---
+
+# Insights Log: {month}
+
+## {today}
+
+- {tag_str} {insight.content}
+"""
+        log_path.write_text(content, encoding="utf-8")
+
+    def update_index(self) -> None:
+        """Update index.md with current state."""
+        index_path = self._wiki_path / "index.md"
+        entities_path = self._wiki_path / "entities"
+
+        # Find all entity files
+        entities = []
+        if entities_path.exists():
+            for f in sorted(entities_path.glob("*.md")):
+                name = f.stem.replace("-", " ").title()
+                link = f"[[entities/{f.stem}]]"
+                entities.append(f"- {link} - {name}")
+
+        entity_list = "\n".join(entities) if entities else "- (none yet)"
+
+        content = f"""---
+title: Index
+tags: [meta, wiki]
+updated: {datetime.now().strftime("%Y-%m-%d")}
+---
+
+# Wiki Index
+
+Auto-generated table of contents for the knowledge base.
+
+## Entities
+{entity_list}
+
+## Concepts
+- (Add concept pages here as they emerge)
+
+## Daily Logs
+- [[insights/{datetime.now().strftime("%Y-%m")}]] - Current month
+
+---
+*Auto-updated by Drewgent Auto-Learning*
+"""
+        index_path.write_text(content, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# AutoLearner (Obsidian Wiki Edition)
+# ---------------------------------------------------------------------------
+
+
 class AutoLearner:
     """
-    Extracts insights from conversation turns automatically.
+    Extracts insights from conversation turns and writes to Obsidian wiki.
 
-    Tracks learned facts to avoid duplicates. Works alongside MemoryStore
-    to enable proactive memory building.
+    Tracks learned facts to avoid duplicates. Outputs to Karpathy's LLM Wiki
+    format with proper Obsidian frontmatter, tags, and wikilinks.
     """
 
-    def __init__(self, memory_store=None, enabled: bool = False, max_per_turn: int = 2):
+    def __init__(
+        self,
+        wiki_path: Optional[Path] = None,
+        enabled: bool = False,
+        max_per_turn: int = 2,
+    ):
         self._enabled = enabled
         self._max_per_turn = max_per_turn
-        self._store = memory_store
+        self._wiki_path = wiki_path
+        self._writer: Optional[ObsidianWriter] = None
 
         # Track what's already learned to avoid duplicates
-        self._learned_user: Set[str] = set()
-        self._learned_memory: Set[str] = set()
+        self._learned: Set[str] = set()
         self._turn_count = 0
 
-    def enable(self, memories_dir: Path) -> None:
-        """Enable auto-learning and load existing facts."""
+    def enable(self, wiki_path: Path) -> None:
+        """Enable auto-learning and initialize wiki writer."""
         self._enabled = True
-        self._load_existing(memories_dir)
+        self._wiki_path = wiki_path
+        self._writer = ObsidianWriter(wiki_path)
+        self._load_existing(wiki_path)
 
-    def _load_existing(self, memories_dir: Path) -> None:
+    def _load_existing(self, wiki_path: Path) -> None:
         """Load existing entries to avoid duplicates."""
-        memories_dir.mkdir(parents=True, exist_ok=True)
-        user_file = memories_dir / "USER.md"
-        mem_file = memories_dir / "MEMORY.md"
+        entities_path = wiki_path / "entities"
+        if not entities_path.exists():
+            return
 
-        if user_file.exists():
-            content = user_file.read_text()
-            for entry in content.split("§"):
-                entry = entry.strip()
-                if entry:
-                    self._learned_user.add(entry.lower()[:60])
+        for file_path in entities_path.glob("*.md"):
+            content = file_path.read_text(encoding="utf-8")
+            # Extract key phrases for deduplication
+            for line in content.split("\n"):
+                if line.strip().startswith("-"):
+                    # Get the content after date and tags
+                    match = re.search(r"[:\-]\s+.+?$", line)
+                    if match:
+                        key = match.group(0).lower()[:50]
+                        self._learned.add(key)
 
-        if mem_file.exists():
-            content = mem_file.read_text()
-            for entry in content.split("§"):
-                entry = entry.strip()
-                if entry:
-                    self._learned_memory.add(entry.lower()[:60])
+    @property
+    def is_enabled(self) -> bool:
+        return self._enabled
+
+    @property
+    def wiki_path(self) -> Optional[Path]:
+        return self._wiki_path
 
     def learn_from_turn(self, user_text: str, assistant_text: str) -> Tuple[int, int]:
         """
@@ -162,7 +528,7 @@ class AutoLearner:
 
         Returns (user_insights_count, memory_insights_count) saved.
         """
-        if not self._enabled:
+        if not self._enabled or not self._writer:
             return 0, 0
 
         self._turn_count += 1
@@ -170,55 +536,45 @@ class AutoLearner:
         if not user_text and not assistant_text:
             return 0, 0
 
-        user_insights, memory_insights = self._extract_insights(
-            user_text, assistant_text
-        )
+        insights = self._extract_insights(user_text, assistant_text)
 
         # Limit per turn
-        user_insights = user_insights[: self._max_per_turn]
-        memory_insights = memory_insights[: self._max_per_turn]
+        insights = insights[: self._max_per_turn]
 
-        saved_user = 0
-        saved_memory = 0
-
-        # Save user insights
-        for insight in user_insights:
+        saved = 0
+        for insight in insights:
             if self._save_insight(insight):
-                saved_user += 1
+                saved += 1
 
-        # Save memory insights
-        for insight in memory_insights:
-            if self._save_insight(insight):
-                saved_memory += 1
-
-        if saved_user or saved_memory:
+        if saved > 0:
             logger.debug(
-                "AutoLearn turn %d: saved %d user, %d memory insights",
+                "AutoLearn turn %d: saved %d insights to Obsidian wiki",
                 self._turn_count,
-                saved_user,
-                saved_memory,
+                saved,
             )
+            # Update index after saving
+            try:
+                self._writer.update_index()
+            except Exception:
+                pass
 
-        return saved_user, saved_memory
+        return saved, saved  # Return same for both counts
 
-    def _extract_insights(
-        self, user_text: str, assistant_text: str
-    ) -> Tuple[List[Insight], List[Insight]]:
+    def _extract_insights(self, user_text: str, assistant_text: str) -> List[Insight]:
         """Extract insights from conversation text."""
-        user_insights: List[Insight] = []
-        memory_insights: List[Insight] = []
+        insights: List[Insight] = []
 
         if not user_text or len(user_text) < 3:
-            return user_insights, memory_insights
+            return insights
 
         # Extract user preferences
         for pattern, itype in _USER_PATTERNS:
             for match in re.finditer(pattern, user_text, re.IGNORECASE):
                 content = match.group(1).strip()
                 if self._is_meaningful(content):
-                    key = f"user:{itype}:{content.lower()[:40]}"
-                    if key not in self._learned_user:
-                        user_insights.append(
+                    key = f"{itype}:{content.lower()[:40]}"
+                    if key not in self._learned:
+                        insights.append(
                             Insight(
                                 target="user",
                                 itype=itype,
@@ -226,73 +582,73 @@ class AutoLearner:
                                 context=user_text[:80],
                             )
                         )
-                        self._learned_user.add(key)
+                        self._learned.add(key)
 
         # Extract communication style
         for pattern, itype in _STYLE_PATTERNS:
             if re.search(pattern, user_text, re.IGNORECASE):
                 content = itype.replace("style_", "")
-                key = f"user:style:{content}"
-                if key not in self._learned_user:
-                    user_insights.append(
+                key = f"style:{content}"
+                if key not in self._learned:
+                    insights.append(
                         Insight(
                             target="user",
                             itype=itype,
                             content=f"prefers {content} responses",
                         )
                     )
-                    self._learned_user.add(key)
+                    self._learned.add(key)
 
         # Extract corrections
         for pattern, itype in _CORRECTION_PATTERNS:
             for match in re.finditer(pattern, user_text, re.IGNORECASE):
                 content = match.group(1).strip()
                 if self._is_meaningful(content):
-                    key = f"user:correction:{content.lower()[:40]}"
-                    if key not in self._learned_user:
-                        user_insights.append(
+                    key = f"correction:{content.lower()[:40]}"
+                    if key not in self._learned:
+                        insights.append(
                             Insight(
                                 target="user",
                                 itype="correction",
                                 content=content,
-                                context=f"Previously did: {assistant_text[:50]}...",
+                                context=f"Previously: {assistant_text[:50]}...",
                             )
                         )
-                        self._learned_user.add(key)
+                        self._learned.add(key)
 
         # Extract anti-preferences
         for pattern, itype in _ANTI_PATTERNS:
             for match in re.finditer(pattern, user_text, re.IGNORECASE):
                 content = match.group(1).strip()
                 if self._is_meaningful(content) and len(content) > 2:
-                    key = f"user:anti:{content.lower()[:40]}"
-                    if key not in self._learned_user:
-                        user_insights.append(
+                    key = f"anti:{content.lower()[:40]}"
+                    if key not in self._learned:
+                        insights.append(
                             Insight(
                                 target="user",
                                 itype="anti_preference",
                                 content=content,
                             )
                         )
-                        self._learned_user.add(key)
+                        self._learned.add(key)
 
         # Extract environment facts
         for pattern, etype in _ENV_PATTERNS:
             for match in re.finditer(pattern, user_text, re.IGNORECASE):
                 content = match.group(1).strip()
                 if self._is_meaningful(content):
-                    key = f"memory:{etype}:{content.lower()[:40]}"
-                    if key not in self._learned_memory:
-                        memory_insights.append(
+                    key = f"{etype}:{content.lower()[:40]}"
+                    if key not in self._learned:
+                        insights.append(
                             Insight(
                                 target="memory",
                                 itype=etype,
                                 content=content,
                             )
                         )
-                        self._learned_memory.add(key)
+                        self._learned.add(key)
 
-        return user_insights, memory_insights
+        return insights
 
     def _is_meaningful(self, text: str) -> bool:
         """Check if text is meaningful enough to save."""
@@ -329,17 +685,12 @@ class AutoLearner:
         return True
 
     def _save_insight(self, insight: Insight) -> bool:
-        """Save insight to memory store. Returns True if saved."""
-        if not self._store:
+        """Save insight to Obsidian wiki. Returns True if saved."""
+        if not self._writer:
             return False
 
         try:
-            content = insight.format()
-            target = insight.target
-
-            # Use store's add method for proper handling
-            result = self._store.add(target, content)
-            return result.get("success", False)
+            return self._writer.write_insight(insight)
         except Exception as e:
             logger.debug("AutoLearn: failed to save insight: %s", e)
             return False

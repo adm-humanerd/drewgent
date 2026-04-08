@@ -1046,18 +1046,28 @@ class AIAgent:
                     self._memory_store.load_from_disk()
 
                     # Auto-learning: extract patterns from conversations automatically
+                    # Outputs to Obsidian wiki format for seamless knowledge management
                     _auto_learn_enabled = mem_config.get("auto_learn", True)
                     if _auto_learn_enabled:
                         _auto_learn_max = int(mem_config.get("auto_learn_max_per_turn", 2))
+                        from drewgent_constants import get_drewgent_home
+                        _drewgent_home = get_drewgent_home()
+                        
+                        # Default wiki path: Drewgent memories dir, but can be overridden
+                        # via skills.config.wiki.path for Obsidian vault integration
+                        _auto_learn_path = mem_config.get("auto_learn_wiki_path")
+                        if not _auto_learn_path:
+                            _auto_learn_path = _drewgent_home / "memories"
+                        _wiki_path = Path(str(_auto_learn_path))
+                        
                         self._auto_learner = AutoLearner(
-                            memory_store=self._memory_store,
+                            wiki_path=_wiki_path,
                             enabled=True,
                             max_per_turn=_auto_learn_max,
                         )
-                        # Load existing facts to avoid duplicates
-                        from drewgent_constants import get_drewgent_home
-                        _drewgent_home = get_drewgent_home()
-                        self._auto_learner.enable(_drewgent_home / "memories")
+                        self._auto_learner.enable(_wiki_path)
+                        if not self.quiet_mode:
+                            print(f"🧠 Auto-learning: ENABLED (Obsidian wiki: {_wiki_path})")
             except Exception:
                 pass  # Memory is optional -- don't break agent init
 
