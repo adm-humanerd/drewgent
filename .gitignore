@@ -59,3 +59,4 @@ mini-swe-agent/
 # Nix
 .direnv/
 result
+update_status.json
