@@ -4495,6 +4495,19 @@ class DrewgentCLI:
                         print(f"  {status} {p['name']}{version}{detail}{error}")
             except Exception as e:
                 print(f"Plugin system error: {e}")
+        elif canonical == "brain":
+            try:
+                from drewgent_cli.brain_manager import handle_brain_command
+                # Parse arguments - extract everything after /brain
+                parts = cmd_original.split(None, 1)
+                args = parts[1].split() if len(parts) > 1 and parts[1].strip() else []
+                success, output = handle_brain_command(args)
+                if success:
+                    self.console.print(output)
+                else:
+                    self.console.print(f"[bold red]Error:[/] {output}")
+            except Exception as e:
+                self.console.print(f"[bold red]Brain command error:[/] {e}")
         elif canonical == "rollback":
             self._handle_rollback_command(cmd_original)
         elif canonical == "stop":
