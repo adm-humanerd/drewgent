@@ -1009,7 +1009,7 @@ def terminal_tool(
     task_id: Optional[str] = None,
     force: bool = False,
     workdir: Optional[str] = None,
-    check_interval: Optional[int] = None,
+    check_interval: int = 30,
     pty: bool = False,
     notify_on_complete: bool = False,
 ) -> str:
@@ -1595,7 +1595,8 @@ TERMINAL_SCHEMA = {
             "check_interval": {
                 "type": "integer",
                 "description": "Seconds between automatic status checks for background processes (gateway/messaging only, minimum 30). When set, I'll proactively report progress.",
-                "minimum": 30
+                "minimum": 30,
+                "default": 30
             },
             "pty": {
                 "type": "boolean",

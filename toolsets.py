@@ -33,6 +33,8 @@ _HERMES_CORE_TOOLS = [
     "web_search", "web_extract",
     # Terminal + process management
     "terminal", "process",
+    # Monitor (pattern matching for process output)
+    "monitor",
     # File manipulation
     "read_file", "write_file", "patch", "search_files",
     # Vision + image generation

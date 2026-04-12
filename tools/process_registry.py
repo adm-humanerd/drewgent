@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shlex
 import signal
 import subprocess
@@ -118,6 +119,10 @@ class ProcessRegistry:
         # to auto-trigger a new agent turn with the process results.
         import queue as _queue_mod
         self.completion_queue: _queue_mod.Queue = _queue_mod.Queue()
+
+        # Regex pattern monitors for Claude Code-style pattern matching.
+        # Format: {monitor_id: {pattern, once, triggered, session_id, compiled_regex}}
+        self._monitors: Dict[str, Dict[str, Any]] = {}
 
     @staticmethod
     def _clean_shell_noise(text: str) -> str:
@@ -329,6 +334,8 @@ class ProcessRegistry:
                     session.output_buffer += chunk
                     if len(session.output_buffer) > session.max_output_chars:
                         session.output_buffer = session.output_buffer[-session.max_output_chars:]
+                # Check monitors for pattern matches (non-blocking)
+                self._check_monitors(session.id, chunk)
         except Exception as e:
             logger.debug("Process stdout reader ended: %s", e)
 
@@ -356,6 +363,8 @@ class ProcessRegistry:
                         session.output_buffer = new_output
                         if len(session.output_buffer) > session.max_output_chars:
                             session.output_buffer = session.output_buffer[-session.max_output_chars:]
+                    # Check monitors for pattern matches (non-blocking)
+                    self._check_monitors(session.id, new_output)
 
                 # Check if process is still running
                 check = env.execute(
@@ -399,6 +408,8 @@ class ProcessRegistry:
                             session.output_buffer += text
                             if len(session.output_buffer) > session.max_output_chars:
                                 session.output_buffer = session.output_buffer[-session.max_output_chars:]
+                        # Check monitors for pattern matches (non-blocking)
+                        self._check_monitors(session.id, text)
                 except EOFError:
                     break
                 except Exception:
@@ -818,6 +829,148 @@ class ProcessRegistry:
 
         return recovered
 
+    # ----- Monitor Methods (Claude Code-style pattern matching) -----
+
+    def add_monitor(
+        self,
+        session_id: str,
+        pattern: str,
+        once: bool = False,
+    ) -> dict:
+        """
+        Add a regex pattern monitor for a process's output.
+
+        When the pattern matches output from the process, an event is pushed
+        to completion_queue to trigger agent wake-up.
+
+        Args:
+            session_id: The process session to monitor
+            pattern: Regex pattern to match against output
+            once: If True, remove the monitor after first match
+
+        Returns:
+            dict with monitor_id on success, or error on failure
+        """
+        # Validate session exists
+        session = self.get(session_id)
+        if session is None:
+            return {"error": f"No process with ID {session_id}"}
+
+        # Compile the regex pattern
+        try:
+            compiled = re.compile(pattern)
+        except re.error as e:
+            return {"error": f"Invalid regex pattern: {e}"}
+
+        # Generate monitor ID
+        monitor_id = f"mon_{uuid.uuid4().hex[:12]}"
+
+        with self._lock:
+            self._monitors[monitor_id] = {
+                "pattern": pattern,
+                "once": once,
+                "triggered": False,
+                "session_id": session_id,
+                "compiled_regex": compiled,
+            }
+
+        logger.debug("Added monitor %s for session %s with pattern %r", monitor_id, session_id, pattern)
+        return {"monitor_id": monitor_id, "session_id": session_id, "pattern": pattern, "once": once}
+
+    def cancel_monitor(self, monitor_id: str) -> dict:
+        """
+        Cancel and remove a monitor.
+
+        Args:
+            monitor_id: The monitor to cancel
+
+        Returns:
+            dict with status
+        """
+        with self._lock:
+            if monitor_id not in self._monitors:
+                return {"error": f"No monitor with ID {monitor_id}"}
+            del self._monitors[monitor_id]
+
+        logger.debug("Cancelled monitor %s", monitor_id)
+        return {"status": "cancelled", "monitor_id": monitor_id}
+
+    def list_monitors(self, session_id: str = None) -> list:
+        """
+        List all active monitors, optionally filtered by session_id.
+
+        Args:
+            session_id: If provided, only show monitors for this session
+
+        Returns:
+            List of monitor info dicts
+        """
+        with self._lock:
+            monitors = []
+            for mid, mon in self._monitors.items():
+                if session_id is None or mon["session_id"] == session_id:
+                    monitors.append({
+                        "monitor_id": mid,
+                        "session_id": mon["session_id"],
+                        "pattern": mon["pattern"],
+                        "once": mon["once"],
+                        "triggered": mon["triggered"],
+                    })
+            return monitors
+
+    def _check_monitors(self, session_id: str, chunk: str):
+        """
+        Check all monitors for a session against new output chunk.
+        Called from reader loops after each chunk is buffered.
+
+        Non-blocking: pushes to completion_queue and marks triggered,
+        but does not wait for anything.
+        """
+        if not chunk:
+            return
+
+        with self._lock:
+            # Collect monitors for this session (iterate over copy)
+            session_monitors = [
+                (mid, mon) for mid, mon in self._monitors.items()
+                if mon["session_id"] == session_id and not mon["triggered"]
+            ]
+
+        for monitor_id, monitor in session_monitors:
+            try:
+                match = monitor["compiled_regex"].search(chunk)
+            except Exception:
+                match = None
+
+            if match:
+                # Get the matched text (use group(0) for full match)
+                matched_text = match.group(0)
+
+                # Push event to completion_queue for agent wake-up
+                self.completion_queue.put({
+                    "type": "monitor",
+                    "monitor_id": monitor_id,
+                    "pattern": monitor["pattern"],
+                    "matched_text": matched_text,
+                    "session_id": session_id,
+                })
+
+                if monitor["once"]:
+                    # Mark as triggered; will be cleaned up
+                    with self._lock:
+                        if monitor_id in self._monitors:
+                            self._monitors[monitor_id]["triggered"] = True
+                    # Remove one-time monitors after triggering
+                    with self._lock:
+                        self._monitors.pop(monitor_id, None)
+                    logger.debug("Monitor %s triggered and removed (once=True)", monitor_id)
+                else:
+                    # Mark as triggered but keep active for repeating patterns
+                    with self._lock:
+                        if monitor_id in self._monitors:
+                            self._monitors[monitor_id]["triggered"] = True
+                    logger.debug("Monitor %s triggered", monitor_id)
+
 
 # Module-level singleton
 process_registry = ProcessRegistry()
@@ -900,6 +1053,9 @@ def _handle_process(args, **kw):
             return _json.dumps(process_registry.submit_stdin(session_id, str(args.get("data", ""))), ensure_ascii=False)
     return _json.dumps({"error": f"Unknown process action: {action}. Use: list, poll, log, wait, kill, write, submit"}, ensure_ascii=False)
 
+
+# Singleton instance used by _handle_process and other modules
+process_registry = ProcessRegistry()
 
 registry.register(
     name="process",

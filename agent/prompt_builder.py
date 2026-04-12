@@ -161,6 +161,54 @@ SESSION_SEARCH_GUIDANCE = (
     "asking them to repeat themselves."
 )
 
+
+# =============================================================================
+# Brain Governance (NeuronFS)
+# =============================================================================
+
+BRAIN_GUIDANCE = (
+    "# Brain Governance (NeuronFS)\\n"
+    "Your behavior is governed by an active brain loaded from ~/.drewgent/brain/.\\n"
+    "The brain implements a 7-layer subsumption hierarchy:\\n"
+    "- P0-brainstem: CRITICAL rules - NEVER-DO, safety, survival\\n"
+    "- P1-limbic: Values, tone, style constraints\\n"
+    "- P2-hippocampus: Memory patterns, context boundaries\\n"
+    "- P3-sensors: Tool routing, platform hints\\n"
+    "- P4-cortex: Skills and workflow patterns\\n"
+    "- P5-ego: Identity and personality\\n"
+    "- P6-prefrontal: High-level strategy\\n"
+    "IMPORTANT: P0 (brainstem) rules OVERRIDE all other layers. Earlier layers take precedence.\\n"
+    "When you encounter a forbidden token (禁), you MUST look up the rule before proceeding.\\n"
+    "The vorq (value-or-lookup) pattern forces you to resolve unknown governance tokens."
+)
+
+
+def brain_load() -> str:
+    """Load the active brain governance content for injection into the system prompt.
+
+    This reads the currently active brain from ~/.drewgent/brain/ and renders
+    its content as governance text. The brain is rendered in subsumption order
+    (P0 first, P6 last), ensuring critical rules appear before advisory ones.
+
+    Returns an empty string if no brain is active or the brain cannot be loaded.
+    """
+    try:
+        from drewgent_cli.brain_manager import load_brain_for_prompt, get_active_brain_name
+
+        active_name = get_active_brain_name()
+        if not active_name:
+            return ""
+
+        brain_content = load_brain_for_prompt(active_name)
+        if not brain_content:
+            return ""
+
+        return f"\n{BRAIN_GUIDANCE}\n\n{brain_content}\n"
+    except Exception as e:
+        logger.debug("Failed to load brain for prompt: %s", e)
+        return ""
+
+
 SKILLS_GUIDANCE = (
     "After completing a complex task (5+ tool calls), fixing a tricky error, "
     "or discovering a non-trivial workflow, save the approach as a "

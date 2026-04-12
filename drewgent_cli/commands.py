@@ -124,6 +124,10 @@ COMMAND_REGISTRY: list[CommandDef] = [
                subcommands=("connect", "disconnect", "status")),
     CommandDef("plugins", "List installed plugins and their status",
                "Tools & Skills", cli_only=True),
+    CommandDef("brain", "Manage NeuronFS brain: init, emit, fire, bomb, diag",
+               "Tools & Skills",
+               args_hint="[init|emit|fire|bomb|diag|list|activate|scan] [name|path]",
+               subcommands=("init", "emit", "fire", "bomb", "diag", "list", "activate", "scan", "unbomb")),
 
     # Info
     CommandDef("commands", "Browse all commands and skills (paginated)", "Info",
