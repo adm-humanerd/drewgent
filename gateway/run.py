@@ -496,6 +496,10 @@ class GatewayRunner:
         self.config = config or load_gateway_config()
         self.adapters: Dict[Platform, BasePlatformAdapter] = {}
 
+        # Cache for platform requirements check results (expensive, rarely changes)
+        # Key: Platform enum, Value: bool
+        self._platform_requirements_cache: Dict[Platform, bool] = {}
+
         # Load ephemeral config from config.yaml / env vars.
         # Both are injected at API-call time only and never persisted.
         self._prefill_messages = self._load_prefill_messages()
@@ -523,11 +527,23 @@ class GatewayRunner:
         self._exit_with_failure = False
         self._exit_reason: Optional[str] = None
 
+        # Task manager for background tasks
+        from gateway.task_manager import TaskManager
+
+        self._task_manager = TaskManager(self)
+
         # Track running agents per session for interrupt support
         # Key: session_key, Value: AIAgent instance
+        # NOTE: Defined BEFORE SessionManager because SessionManager references these
         self._running_agents: Dict[str, Any] = {}
         self._running_agents_ts: Dict[str, float] = {}  # start timestamp per session
         self._pending_messages: Dict[str, str] = {}  # Queued messages during interrupt
+
+        # Session manager for session-related operations
+        # NOTE: Initialized AFTER _running_agents because it references them
+        from gateway.session_manager import SessionManager
+
+        self._session_manager = SessionManager(self)
 
         # Cache AIAgent instances per session to preserve prompt caching.
         # Without this, a new AIAgent is created per message, rebuilding the
@@ -559,6 +575,10 @@ class GatewayRunner:
         # Track pending /update prompt responses per session.
         # Key: session_key, Value: True when a prompt is waiting for user input.
         self._update_prompt_pending: Dict[str, bool] = {}
+
+        # Track background process watcher tasks for pending_watchers.
+        # Key: session_id, Value: asyncio.Task
+        self._watcher_tasks: Dict[str, asyncio.Task] = {}
 
         # Persistent Honcho managers keyed by gateway session key.
         # This preserves write_frequency="session" semantics across short-lived
@@ -593,9 +613,6 @@ class GatewayRunner:
 
         # Per-chat voice reply mode: "off" | "voice_only" | "all"
         self._voice_mode: Dict[str, str] = self._load_voice_modes()
-
-        # Track background tasks to prevent garbage collection mid-execution
-        self._background_tasks: set = set()
 
     # -- Setup skill availability ----------------------------------------
 
@@ -1341,6 +1358,7 @@ class GatewayRunner:
             self._schedule_update_notification_watch()
 
         # Drain any recovered process watchers (from crash recovery checkpoint)
+        # These are tracked via process_registry, not _background_tasks
         try:
             from tools.process_registry import process_registry
 
@@ -1355,10 +1373,10 @@ class GatewayRunner:
             logger.error("Recovered watcher setup error: %s", e)
 
         # Auto-resume interrupted sessions on gateway restart
-        asyncio.create_task(self._auto_resume_interrupted_sessions())
+        self._task_manager.create_task(self._auto_resume_interrupted_sessions())
 
         # Start background session expiry watcher for proactive memory flushing
-        asyncio.create_task(self._session_expiry_watcher())
+        self._task_manager.create_task(self._session_expiry_watcher())
 
         # Start background reconnection watcher for platforms that failed at startup
         if self._failed_platforms:
@@ -1367,14 +1385,13 @@ class GatewayRunner:
                 len(self._failed_platforms),
                 ", ".join(p.value for p in self._failed_platforms),
             )
-        asyncio.create_task(self._platform_reconnect_watcher())
+        self._task_manager.create_task(self._platform_reconnect_watcher())
 
         # Periodic drain: pick up new pending_watchers every 30s so background
         # process notifications arrive even when no messages are flowing in.
-        asyncio.create_task(self._pending_watcher_drain())
+        self._task_manager.create_task(self._pending_watcher_drain())
 
         logger.info("Press Ctrl+C to stop")
-
         return True
 
     async def _session_expiry_watcher(self, interval: int = 300):
@@ -1617,6 +1634,12 @@ class GatewayRunner:
                 while process_registry.pending_watchers:
                     watcher = process_registry.pending_watchers.pop(0)
                     task = asyncio.create_task(self._run_process_watcher(watcher))
+                    # Auto-cleanup task reference when done to prevent memory leak
+                    task.add_done_callback(
+                        lambda t, sid=watcher["session_id"]: self._watcher_tasks.pop(
+                            sid, None
+                        )
+                    )
                     self._watcher_tasks[watcher["session_id"]] = task
                     logger.debug(
                         "Drained pending watcher for session %s",
@@ -1665,9 +1688,7 @@ class GatewayRunner:
                 logger.error("✗ %s disconnect error: %s", platform.value, e)
 
         # Cancel any pending background tasks
-        for _task in list(self._background_tasks):
-            _task.cancel()
-        self._background_tasks.clear()
+        await self._task_manager.cancel_all()
 
         self.adapters.clear()
         self._running_agents.clear()
@@ -2757,7 +2778,7 @@ class GatewayRunner:
                 )
 
         # Load conversation history from transcript
-        history = self.session_store.load_transcript(session_entry.session_id)
+        history = self._session_manager.load_history(session_entry.session_id)
 
         # -----------------------------------------------------------------
         # Session hygiene: auto-compress pathologically large transcripts
@@ -3656,11 +3677,9 @@ class GatewayRunner:
         try:
             old_entry = self.session_store._entries.get(session_key)
             if old_entry:
-                _flush_task = asyncio.create_task(
+                self._task_manager.create_task(
                     self._async_flush_memories(old_entry.session_id)
                 )
-                self._background_tasks.add(_flush_task)
-                _flush_task.add_done_callback(self._background_tasks.discard)
         except Exception as e:
             logger.debug("Gateway memory flush on reset failed: %s", e)
         self._evict_cached_agent(session_key)
@@ -3680,7 +3699,7 @@ class GatewayRunner:
             pass
 
         # Reset the session
-        new_entry = self.session_store.reset_session(session_key)
+        new_entry = self._session_manager.reset_session(session_key)
 
         # Clear any session-scoped model override so the next agent picks up
         # the configured default instead of the previously switched model.
@@ -3756,7 +3775,7 @@ class GatewayRunner:
     async def _handle_status_command(self, event: MessageEvent) -> str:
         """Handle /status command."""
         source = event.source
-        session_entry = self.session_store.get_or_create_session(source)
+        session_entry = self._session_manager.get_session(source)
 
         connected_platforms = [p.value for p in self.adapters.keys()]
 
@@ -4991,9 +5010,9 @@ class GatewayRunner:
         task_id = f"bg_{datetime.now().strftime('%H%M%S')}_{os.urandom(3).hex()}"
 
         # Fire-and-forget the background task
-        _task = asyncio.create_task(self._run_background_task(prompt, source, task_id))
-        self._background_tasks.add(_task)
-        _task.add_done_callback(self._background_tasks.discard)
+        self._task_manager.create_task(
+            self._run_background_task(prompt, source, task_id)
+        )
 
         preview = prompt[:60] + ("..." if len(prompt) > 60 else "")
         return f'🔄 Background task started: "{preview}"\nTask ID: {task_id}\nYou can keep chatting — results will appear when done.'
@@ -5156,18 +5175,9 @@ class GatewayRunner:
         import uuid as _uuid
 
         task_id = f"btw_{datetime.now().strftime('%H%M%S')}_{_uuid.uuid4().hex[:6]}"
-        _task = asyncio.create_task(
-            self._run_btw_task(question, source, session_key, task_id)
+        self._task_manager.create_btw_task(
+            session_key, self._run_btw_task(question, source, session_key, task_id)
         )
-        self._background_tasks.add(_task)
-        self._active_btw_tasks[session_key] = _task
-
-        def _cleanup(task):
-            self._background_tasks.discard(task)
-            if self._active_btw_tasks.get(session_key) is task:
-                self._active_btw_tasks.pop(session_key, None)
-
-        _task.add_done_callback(_cleanup)
 
         preview = question[:60] + ("..." if len(question) > 60 else "")
         return f'💬 /btw: "{preview}"\nReply will appear here shortly.'
@@ -5639,11 +5649,9 @@ class GatewayRunner:
 
         # Flush memories for current session before switching
         try:
-            _flush_task = asyncio.create_task(
+            self._task_manager.create_task(
                 self._async_flush_memories(current_entry.session_id)
             )
-            self._background_tasks.add(_flush_task)
-            _flush_task.add_done_callback(self._background_tasks.discard)
         except Exception as e:
             logger.debug("Memory flush on resume failed: %s", e)
 
@@ -6948,7 +6956,7 @@ class GatewayRunner:
         if notify_mode == "off" and not agent_notify:
             # Still wait for the process to exit so we can log it, but don't
             # push any messages to the user.
-            while True:
+            while self._running:
                 await asyncio.sleep(interval)
                 session = process_registry.get(session_id)
                 if session is None or session.exited:
@@ -6957,7 +6965,7 @@ class GatewayRunner:
             return
 
         last_output_len = 0
-        while True:
+        while self._running:
             await asyncio.sleep(interval)
 
             session = process_registry.get(session_id)

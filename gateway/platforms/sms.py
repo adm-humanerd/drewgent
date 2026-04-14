@@ -157,7 +157,9 @@ class SmsAdapter(BasePlatformAdapter):
                 form_data.add_field("Body", chunk)
 
                 try:
-                    async with session.post(url, data=form_data, headers=headers) as resp:
+                    async with session.post(
+                        url, data=form_data, headers=headers
+                    ) as resp:
                         body = await resp.json()
                         if resp.status >= 400:
                             error_msg = body.get("message", str(body))
@@ -174,7 +176,9 @@ class SmsAdapter(BasePlatformAdapter):
                         msg_sid = body.get("sid", "")
                         last_result = SendResult(success=True, message_id=msg_sid)
                 except Exception as e:
-                    logger.error("[sms] send error to %s: %s", _redact_phone(chat_id), e)
+                    logger.error(
+                        "[sms] send error to %s: %s", _redact_phone(chat_id), e
+                    )
                     return SendResult(success=False, error=str(e))
         finally:
             # Close session only if we created a fallback (no persistent session)
@@ -207,11 +211,69 @@ class SmsAdapter(BasePlatformAdapter):
     # Twilio webhook handler
     # ------------------------------------------------------------------
 
+    async def _is_webhook_signature_valid(self, request, raw_body: bytes) -> bool:
+        """Validate Twilio webhook signature to prevent unauthorized requests.
+
+        Twilio signs webhooks using HMAC-SHA1 with the auth token.
+        See: https://www.twilio.com/docs/usage/security#validating-requests
+
+        Args:
+            request: The aiohttp request object (for URL)
+            raw_body: The raw request body bytes (already read)
+        """
+        import hashlib
+        import hmac
+
+        signature = request.headers.get("X-Twilio-Signature", "")
+        if not signature:
+            logger.warning("[sms] webhook missing X-Twilio-Signature header")
+            return False
+
+        # Build the URL that Twilio used to request this webhook
+        # Use the request's actual URL scheme/host from headers or construct from request
+        url = str(request.url)
+
+        # Parse form data from the pre-read body
+        try:
+            form = urllib.parse.parse_qs(raw_body.decode("utf-8"))
+        except Exception:
+            return False
+
+        # Sort parameters by key and append key=value to URL
+        for key in sorted(form.keys()):
+            value = form[key][0] if form[key] else ""
+            url += key + value
+
+        # Calculate expected signature
+        expected = hmac.new(
+            self._auth_token.encode("ascii"), url.encode("ascii"), hashlib.sha1
+        ).digest()
+        expected_b64 = base64.b64encode(expected).decode("ascii").rstrip("\n")
+
+        # Constant-time comparison to prevent timing attacks
+        is_valid = hmac.compare_digest(signature, expected_b64)
+
+        if not is_valid:
+            logger.warning("[sms] webhook signature validation failed")
+
+        return is_valid
+
     async def _handle_webhook(self, request) -> "aiohttp.web.Response":
         from aiohttp import web
 
+        # Read body ONCE and reuse for both validation and parsing
         try:
             raw = await request.read()
+        except Exception as e:
+            logger.error("[sms] webhook read error: %s", e)
+            return web.Response(status=400, text="Bad request")
+
+        # Validate Twilio webhook signature (uses pre-read body)
+        if not await self._is_webhook_signature_valid(request, raw):
+            logger.warning("[sms] rejected webhook with invalid signature")
+            return web.Response(status=403, text="Forbidden")
+
+        try:
             # Twilio sends form-encoded data, not JSON
             form = urllib.parse.parse_qs(raw.decode("utf-8"))
         except Exception as e:
@@ -236,7 +298,9 @@ class SmsAdapter(BasePlatformAdapter):
 
         # Ignore messages from our own number (echo prevention)
         if from_number == self._from_number:
-            logger.debug("[sms] ignoring echo from own number %s", _redact_phone(from_number))
+            logger.debug(
+                "[sms] ignoring echo from own number %s", _redact_phone(from_number)
+            )
             return web.Response(
                 text='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
                 content_type="application/xml",
