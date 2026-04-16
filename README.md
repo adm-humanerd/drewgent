@@ -4,7 +4,10 @@
 
 # Drewgent Agent ☤
 
+> **⚠️ NOTE:** Drewgent is a **fork of [Hermes-Agent](https://github.com/adm-humanerd/hermes-agent)** by Nous Research, optimized for constrained environments and extended with Knowledge Bus & Feedback Loop.
+
 <p align="center">
+  <a href="https://github.com/adm-humanerd/drewgent"><img src="https://img.shields.io/badge/Fork%20of-Hermes--Agent-orange?style=for-the-badge" alt="Fork of Hermes-Agent"></a>
   <a href="https://github.com/adm-humanerd/drewgent/blob/main/docs/DREWGENT_ARCHITECTURE.md"><img src="https://img.shields.io/badge/Docs-Architecture-FFD700?style=for-the-badge" alt="Documentation"></a>
   <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://github.com/adm-humanerd/drewgent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
@@ -15,7 +18,7 @@
 
 ## Why Drewgent?
 
-While Hermes-Agent is a general-purpose agent, Drewgent is **optimized for limited environments** (like a $5 VPS or home lab). It includes:
+While Hermes-Agent is a general-purpose agent, Drewgent (a fork) is **optimized for limited environments** (like a $5 VPS or home lab). It includes:
 
 - **Docker-First Architecture**: Pre-built images, no `git clone` required
 - **Local Monitoring**: Hourly Discord notifications without external services
