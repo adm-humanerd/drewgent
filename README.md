@@ -11,40 +11,95 @@
   <a href="https://humanerd.ai"><img src="https://img.shields.io/badge/Built%20by-HUMANERD-blueviolet?style=for-the-badge" alt="Built by HUMANERD"></a>
 </p>
 
-**Drewgent** is a self-improving AI agent built by [HUMANERD](https://humanerd.ai). It features a built-in **Knowledge Bus** and **Feedback Loop** — every response is verified, stored, and used to improve future responses.
+**Drewgent** is a self-improving AI agent built by [HUMANERD](https://humanerd.ai). Built on Hermes-Agent, it features a built-in **Knowledge Bus** and **Feedback Loop** — every response is verified, stored, and used to improve future responses.
 
-## Key Features
+## Why Drewgent?
 
-| Feature | Description |
-|---------|-------------|
-| **Knowledge Bus** | Central knowledge store with pattern recognition |
-| **Feedback Loop** | Verification → Knowledge → Better decisions |
-| **Verification Engine** | Quality gates with Korean language priority, hallucination detection |
-| **Revision Loop** | Automatic response revision when quality thresholds aren't met |
-| **Docker-First** | Pre-built images for easy deployment anywhere |
-| **Local Monitoring** | Hourly Discord notifications with metrics |
+While Hermes-Agent is a general-purpose agent, Drewgent is **optimized for limited environments** (like a $5 VPS or home lab). It includes:
+
+- **Docker-First Architecture**: Pre-built images, no `git clone` required
+- **Local Monitoring**: Hourly Discord notifications without external services
+- **Knowledge Bus**: Patterns learned from experience persist across sessions
+- **Built-in Verification**: Quality gates catch hallucinations before they happen
+
+## The Story Behind Drewgent
+
+Drewgent was born from solving real problems in constrained environments:
+
+### The Journey
+
+```
+💀 Problem: "Docker build times out on Colima"
+   ↓
+💡 Solution: Use pre-built images, volume mount for code changes
+   
+💀 Problem: "Need to monitor the agent but no external services"
+   ↓
+💡 Solution: Custom monitor script → Discord webhook
+   
+💀 Problem: "Tailscale DNS intercepts all DNS queries"
+   ↓
+💡 Solution: Monitor runs in Docker, health checks via localhost
+   
+💀 Problem: "Cloudflare Tunnel created in wrong account"
+   ↓
+💡 Solution: Docker Hub images + local monitoring = no tunnel needed
+   
+💀 Problem: "How to improve agent over time?"
+   ↓
+💡 Solution: Knowledge Bus + Verification Engine + Feedback Loop
+```
+
+### Key Optimizations
+
+| Problem | Solution |
+|---------|----------|
+| Docker build timeout (Colima 120s) | Pre-built images on Docker Hub |
+| Mac DNS intercepted by Tailscale | Docker network_mode: host + localhost checks |
+| No external monitoring available | Custom Discord monitor script |
+| Agent doesn't learn from mistakes | Knowledge Bus stores verification results |
+| Multiple services, complex setup | docker-compose.yml with restart: unless-stopped |
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Drewgent Agent                            │
+│                     Drewgent Agent                          │
 ├─────────────────────────────────────────────────────────────┤
-│  Gateway → Agent → Knowledge Bus ← Verification Engine       │
+│  Gateway → Agent → Knowledge Bus ← Verification Engine     │
 │                              ↑                               │
-│                          Growth Engine                       │
+│                          Growth Engine                        │
 │                              ↑                               │
-│                          Revision Loop                      │
+│                          Revision Loop                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start (Docker)
+### The Feedback Loop
+
+Drewgent doesn't just respond — it **learns**:
+
+1. **Verification**: Every response is checked for quality (Korean language priority, hallucination detection, completeness)
+2. **Storage**: Failed checks are stored in Knowledge Bus
+3. **Query**: Future verifications query past patterns
+4. **Improvement**: The agent gets better over time
+
+## Quick Start
+
+### Prerequisites
+- Docker & Docker Compose
+- API keys (Anthropic, OpenAI, MiniMax)
+- Discord webhook (optional, for monitoring)
+
+### Installation
 
 ```bash
-# 1. Create directory
+# 1. Pull the image (no git clone needed!)
+docker pull humanerdkr/drewgent:latest
+
+# 2. Create directory
 mkdir -p data
 
-# 2. Create .env file
+# 3. Create .env file
 cat > .env << 'EOF'
 ANTHROPIC_API_KEY=your_key
 OPENAI_API_KEY=your_key
@@ -52,11 +107,13 @@ MINIMAX_API_KEY=your_key
 DREW_DISCORD_WEBHOOK=https://discord.com/api/webhooks/YOUR_WEBHOOK
 EOF
 
-# 3. Create docker-compose.yml (see below)
+# 4. Create docker-compose.yml (see below)
 
-# 4. Start
+# 5. Start
 docker-compose up -d
 ```
+
+That's it. No `git clone`, no dependency installation, no build steps.
 
 ## Docker Compose
 
@@ -105,24 +162,32 @@ services:
 
 ## Docker Images
 
-| Image | Pull Command |
-|-------|--------------|
-| `humanerdkr/drewgent:latest` | `docker pull humanerdkr/drewgent:latest` |
-| `humanerdkr/drewgent-monitor:latest` | `docker pull humanerdkr/drewgent-monitor:latest` |
+| Image | Description | Pull Command |
+|-------|-------------|--------------|
+| `humanerdkr/drewgent:latest` | Gateway + Agent | `docker pull humanerdkr/drewgent:latest` |
+| `humanerdkr/drewgent-monitor:latest` | Discord Monitor | `docker pull humanerdkr/drewgent-monitor:latest` |
 
-**Rename as you like:**
+### Rename as You Like
+
 ```bash
+# Pull and rename to your brand
 docker pull humanerdkr/drewgent:latest
-docker tag humanerdkr/drewgent:latest my-agent:latest
+docker tag humanerdkr/drewgent:latest my-cool-agent:latest
 ```
 
 ## Monitoring
 
 The Monitor service sends hourly reports to Discord:
-- Gateway health status
-- Verification statistics (pass rate, scores, P0 blocks)
-- Knowledge Bus growth
-- Morning summary at 8 AM
+
+- **Health Status**: Is the gateway alive?
+- **Verification Stats**: Pass rate, average score, P0 blocks
+- **Knowledge Bus**: Patterns learned, growth over time
+- **Morning Summary**: 8 AM report of midnight-to-8AM activity
+
+```
+⏰ Every hour (except midnight-8AM): Full metrics report
+🌅 8 AM: Night summary
+```
 
 ## API Endpoints
 
@@ -133,11 +198,41 @@ The Monitor service sends hourly reports to Discord:
 | `GET /v1/knowledge` | Knowledge Bus data |
 | `GET /v1/models` | Available models |
 
+## Troubleshooting
+
+### "No module named 'drewgent_constants'"
+
+Fixed in the Docker image. Make sure you're using the latest:
+```bash
+docker pull humanerdkr/drewgent:latest
+```
+
+### "Docker build times out"
+
+Don't build locally — use the pre-built image:
+```bash
+docker pull humanerdkr/drewgent:latest
+```
+
+### "Monitor can't reach gateway"
+
+Make sure all services use `network_mode: host` for localhost access.
+
 ## Documentation
 
-- [Architecture Guide](./docs/DREWGENT_ARCHITECTURE.md) - Full architecture and implementation details
-- [Knowledge Bus](./docs/PDCA_KNOWLEDGE_BUS.md) - Knowledge Bus implementation
+- [Architecture Guide](./docs/DREWGENT_ARCHITECTURE.md) - Full architecture, module connections, optimization decisions
+- [Knowledge Bus](./docs/PDCA_KNOWLEDGE_BUS.md) - How the feedback loop works
 - [Development Guide](./AGENTS.md) - For contributors
+
+## Lessons Learned
+
+Building Drewgent taught us important lessons about **constrained environments**:
+
+1. **Pre-built images > local builds**: Colima's 120s timeout makes local builds unreliable
+2. **Docker networking quirks**: `network_mode: host` avoids Docker's DNS issues
+3. **VPNs can break DNS**: Tailscale intercepts all DNS queries by default
+4. **Cloudflare Tunnel account isolation**: Always verify which account you're using
+5. **Feedback loops improve quality**: Storing verification results makes the agent smarter over time
 
 ## License
 
