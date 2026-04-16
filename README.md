@@ -5,246 +5,140 @@
 # Drewgent Agent ☤
 
 <p align="center">
-  <a href="https://drewgent-agent.humanerd.ai/docs/"><img src="https://img.shields.io/badge/Docs-drewgent--agent.humanerd.ai-FFD700?style=for-the-badge" alt="Documentation"></a>
+  <a href="https://github.com/adm-humanerd/drewgent/blob/main/docs/DREWGENT_ARCHITECTURE.md"><img src="https://img.shields.io/badge/Docs-Architecture-FFD700?style=for-the-badge" alt="Documentation"></a>
   <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://github.com/adm-humanerd/drewgent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://humanerd.ai"><img src="https://img.shields.io/badge/Built%20by-Nous%20Research-blueviolet?style=for-the-badge" alt="Built by HUMANERD"></a>
+  <a href="https://humanerd.ai"><img src="https://img.shields.io/badge/Built%20by-HUMANERD-blueviolet?style=for-the-badge" alt="Built by HUMANERD"></a>
 </p>
 
-**The self-improving AI agent built by [HUMANERD](https://humanerd.ai).** It's the only agent with a built-in learning loop — it creates skills from experience, improves them during use, nudges itself to persist knowledge, searches its own past conversations, and builds a deepening model of who you are across sessions. Run it on a $5 VPS, a GPU cluster, or serverless infrastructure that costs nearly nothing when idle. It's not tied to your laptop — talk to it from Telegram while it works on a cloud VM.
+**Drewgent** is a self-improving AI agent built by [HUMANERD](https://humanerd.ai). It features a built-in **Knowledge Bus** and **Feedback Loop** — every response is verified, stored, and used to improve future responses.
 
-Use any model you want — [Nous Portal](https://portal.humanerd.ai), [OpenRouter](https://openrouter.ai) (200+ models), [z.ai/GLM](https://z.ai), [Kimi/Moonshot](https://platform.moonshot.ai), [MiniMax](https://www.minimax.io), OpenAI, or your own endpoint. Switch with `drewgent` model` — no code changes, no lock-in.
+## Key Features
 
-<table>
-<tr><td><b>A real terminal interface</b></td><td>Full TUI with multiline editing, slash-command autocomplete, conversation history, interrupt-and-redirect, and streaming tool output.</td></tr>
-<tr><td><b>Lives where you do</b></td><td>Telegram, Discord, Slack, WhatsApp, Signal, and CLI — all from a single gateway process. Voice memo transcription, cross-platform conversation continuity.</td></tr>
-<tr><td><b>A closed learning loop</b></td><td>Agent-curated memory with periodic nudges. Autonomous skill creation after complex tasks. Skills self-improve during use. FTS5 session search with LLM summarization for cross-session recall. <a href="https://github.com/plastic-labs/honcho">Honcho</a> dialectic user modeling. Compatible with the <a href="https://agentskills.io">agentskills.io</a> open standard.</td></tr>
-<tr><td><b>Scheduled automations</b></td><td>Built-in cron scheduler with delivery to any platform. Daily reports, nightly backups, weekly audits — all in natural language, running unattended.</td></tr>
-<tr><td><b>Delegates and parallelizes</b></td><td>Spawn isolated subagents for parallel workstreams. Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns.</td></tr>
-<tr><td><b>Runs anywhere, not just your laptop</b></td><td>Six terminal backends — local, Docker, SSH, Daytona, Singularity, and Modal. Daytona and Modal offer serverless persistence — your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.</td></tr>
-<tr><td><b>Research-ready</b></td><td>Batch trajectory generation, Atropos RL environments, trajectory compression for training the next generation of tool-calling models.</td></tr>
-</table>
+| Feature | Description |
+|---------|-------------|
+| **Knowledge Bus** | Central knowledge store with pattern recognition |
+| **Feedback Loop** | Verification → Knowledge → Better decisions |
+| **Verification Engine** | Quality gates with Korean language priority, hallucination detection |
+| **Revision Loop** | Automatic response revision when quality thresholds aren't met |
+| **Docker-First** | Pre-built images for easy deployment anywhere |
+| **Local Monitoring** | Hourly Discord notifications with metrics |
 
----
+## Architecture
 
-## Quick Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/adm-humanerd/drewgent/main/scripts/install.sh | bash
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Drewgent Agent                            │
+├─────────────────────────────────────────────────────────────┤
+│  Gateway → Agent → Knowledge Bus ← Verification Engine       │
+│                              ↑                               │
+│                          Growth Engine                       │
+│                              ↑                               │
+│                          Revision Loop                      │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-Works on Linux, macOS, and WSL2. The installer handles everything — Python, Node.js, dependencies, and the `drewgent`` command. No prerequisites except git.
-
-> **Windows:** Native Windows is not supported. Please install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and run the command above.
-
-After installation:
+## Quick Start (Docker)
 
 ```bash
-source ~/.bashrc    # reload shell (or: source ~/.zshrc)
-hermes              # start chatting!
+# 1. Create directory
+mkdir -p data
+
+# 2. Create .env file
+cat > .env << 'EOF'
+ANTHROPIC_API_KEY=your_key
+OPENAI_API_KEY=your_key
+MINIMAX_API_KEY=your_key
+DREW_DISCORD_WEBHOOK=https://discord.com/api/webhooks/YOUR_WEBHOOK
+EOF
+
+# 3. Create docker-compose.yml (see below)
+
+# 4. Start
+docker-compose up -d
 ```
 
----
+## Docker Compose
 
-## Getting Started
+```yaml
+services:
+  drewgent-gateway:
+    image: humanerdkr/drewgent:latest
+    container_name: drewgent-gateway
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data:/opt/data
+      - ~/.drewgent:/root/.drewgent:rw
+    env_file:
+      - .env
+    environment:
+      - HERMES_HOME=/opt/data
+      - PYTHONPATH=/opt/drewgent
+    entrypoint: ["bash", "-c", "cd /opt/drewgent && mkdir -p /opt/data && exec python3 -m drewgent_cli.main gateway run"]
 
+  drewgent-agent:
+    image: humanerdkr/drewgent:latest
+    container_name: drewgent-agent
+    restart: unless-stopped
+    network_mode: host
+    entrypoint: ["bash", "-c", "cd /opt/drewgent && mkdir -p /opt/data && exec python3 cli.py agent run"]
+    volumes:
+      - ./data:/opt/data
+      - ~/.drewgent:/root/.drewgent:rw
+    env_file:
+      - .env
+    depends_on:
+      - drewgent-gateway
+
+  monitor:
+    image: humanerdkr/drewgent-monitor:latest
+    container_name: drewgent-monitor
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data:/opt/data
+    environment:
+      - GATEWAY_URL=http://localhost:8642
+      - DREW_DISCORD_WEBHOOK=https://discord.com/api/webhooks/YOUR_WEBHOOK
+```
+
+## Docker Images
+
+| Image | Pull Command |
+|-------|--------------|
+| `humanerdkr/drewgent:latest` | `docker pull humanerdkr/drewgent:latest` |
+| `humanerdkr/drewgent-monitor:latest` | `docker pull humanerdkr/drewgent-monitor:latest` |
+
+**Rename as you like:**
 ```bash
-hermes              # Interactive CLI — start a conversation
-hermes model        # Choose your LLM provider and model
-hermes tools        # Configure which tools are enabled
-hermes config set   # Set individual config values
-drewgent gateway      # Start the messaging gateway (Telegram, Discord, etc.)
-drewgent setup        # Run the full setup wizard (configures everything at once)
-drewgent claw migrate # Migrate from OpenClaw (if coming from OpenClaw)
-hermes update       # Update to the latest version
-drewgent doctor       # Diagnose any issues
+docker pull humanerdkr/drewgent:latest
+docker tag humanerdkr/drewgent:latest my-agent:latest
 ```
 
-📖 **[Full documentation →](https://drewgent-agent.humanerd.ai/docs/)**
+## Monitoring
 
-## CLI vs Messaging Quick Reference
+The Monitor service sends hourly reports to Discord:
+- Gateway health status
+- Verification statistics (pass rate, scores, P0 blocks)
+- Knowledge Bus growth
+- Morning summary at 8 AM
 
-Drewgent has two entry points: start the terminal UI with `drewgent``, or run the gateway and talk to it from Telegram, Discord, Slack, WhatsApp, Signal, or Email. Once you're in a conversation, many slash commands are shared across both interfaces.
+## API Endpoints
 
-| Action | CLI | Messaging platforms |
-|---------|-----|---------------------|
-| Start chatting | `drewgent`` | Run `drewgent gateway setup` + `drewgent gateway start`, then send the bot a message |
-| Start fresh conversation | `/new` or `/reset` | `/new` or `/reset` |
-| Change model | `/model [provider:model]` | `/model [provider:model]` |
-| Set a personality | `/personality [name]` | `/personality [name]` |
-| Retry or undo the last turn | `/retry`, `/undo` | `/retry`, `/undo` |
-| Compress context / check usage | `/compress`, `/usage`, `/insights [--days N]` | `/compress`, `/usage`, `/insights [days]` |
-| Browse skills | `/skills` or `/<skill-name>` | `/skills` or `/<skill-name>` |
-| Interrupt current work | `Ctrl+C` or send a new message | `/stop` or send a new message |
-| Platform-specific status | `/platforms` | `/status`, `/sethome` |
-
-For the full command lists, see the [CLI guide](https://drewgent-agent.humanerd.ai/docs/user-guide/cli) and the [Messaging Gateway guide](https://drewgent-agent.humanerd.ai/docs/user-guide/messaging).
-
----
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /v1/metrics` | Verification metrics |
+| `GET /v1/knowledge` | Knowledge Bus data |
+| `GET /v1/models` | Available models |
 
 ## Documentation
 
-All documentation lives at **[drewgent-agent.humanerd.ai/docs](https://drewgent-agent.humanerd.ai/docs/)**:
-
-| Section | What's Covered |
-|---------|---------------|
-| [Quickstart](https://drewgent-agent.humanerd.ai/docs/getting-started/quickstart) | Install → setup → first conversation in 2 minutes |
-| [CLI Usage](https://drewgent-agent.humanerd.ai/docs/user-guide/cli) | Commands, keybindings, personalities, sessions |
-| [Configuration](https://drewgent-agent.humanerd.ai/docs/user-guide/configuration) | Config file, providers, models, all options |
-| [Messaging Gateway](https://drewgent-agent.humanerd.ai/docs/user-guide/messaging) | Telegram, Discord, Slack, WhatsApp, Signal, Home Assistant |
-| [Security](https://drewgent-agent.humanerd.ai/docs/user-guide/security) | Command approval, DM pairing, container isolation |
-| [Tools & Toolsets](https://drewgent-agent.humanerd.ai/docs/user-guide/features/tools) | 40+ tools, toolset system, terminal backends |
-| [Skills System](https://drewgent-agent.humanerd.ai/docs/user-guide/features/skills) | Procedural memory, Skills Hub, creating skills |
-| [Memory](https://drewgent-agent.humanerd.ai/docs/user-guide/features/memory) | Persistent memory, user profiles, best practices |
-| [MCP Integration](https://drewgent-agent.humanerd.ai/docs/user-guide/features/mcp) | Connect any MCP server for extended capabilities |
-| [Cron Scheduling](https://drewgent-agent.humanerd.ai/docs/user-guide/features/cron) | Scheduled tasks with platform delivery |
-| [Context Files](https://drewgent-agent.humanerd.ai/docs/user-guide/features/context-files) | Project context that shapes every conversation |
-| [Architecture](https://drewgent-agent.humanerd.ai/docs/developer-guide/architecture) | Project structure, agent loop, key classes |
-| [Contributing](https://drewgent-agent.humanerd.ai/docs/developer-guide/contributing) | Development setup, PR process, code style |
-| [CLI Reference](https://drewgent-agent.humanerd.ai/docs/reference/cli-commands) | All commands and flags |
-| [Environment Variables](https://drewgent-agent.humanerd.ai/docs/reference/environment-variables) | Complete env var reference |
-
----
-
-## Migrating from OpenClaw
-
-If you're coming from OpenClaw, Drewgent can automatically import your settings, memories, skills, and API keys.
-
-**During first-time setup:** The setup wizard (`drewgent setup`) automatically detects `~/.openclaw` and offers to migrate before configuration begins.
-
-**Anytime after install:**
-
-```bash
-drewgent claw migrate              # Interactive migration (full preset)
-drewgent claw migrate --dry-run    # Preview what would be migrated
-drewgent claw migrate --preset user-data   # Migrate without secrets
-drewgent claw migrate --overwrite  # Overwrite existing conflicts
-```
-
-What gets imported:
-- **SOUL.md** — persona file
-- **Memories** — MEMORY.md and USER.md entries
-- **Skills** — user-created skills → `~/.drewgent/skills/openclaw-imports/`
-- **Command allowlist** — approval patterns
-- **Messaging settings** — platform configs, allowed users, working directory
-- **API keys** — allowlisted secrets (Telegram, OpenRouter, OpenAI, Anthropic, ElevenLabs)
-- **TTS assets** — workspace audio files
-- **Workspace instructions** — AGENTS.md (with `--workspace-target`)
-
-See `drewgent claw migrate --help` for all options, or use the `openclaw-migration` skill for an interactive agent-guided migration with dry-run previews.
-
----
-
-## Contributing
-
-We welcome contributions! See the [Contributing Guide](https://drewgent-agent.humanerd.ai/docs/developer-guide/contributing) for development setup, code style, and PR process.
-
-Quick start for contributors:
-
-```bash
-git clone https://github.com/adm-humanerd/drewgent.git
-cd drewgent-agent
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv venv --python 3.11
-source venv/bin/activate
-uv pip install -e ".[all,dev]"
-python -m pytest tests/ -q
-```
-
-> **RL Training (optional):** To work on the RL/Tinker-Atropos integration:
-> ```bash
-> git submodule update --init tinker-atropos
-> uv pip install -e "./tinker-atropos"
-> ```
-
----
-
-## Customization Guide
-
-### Clone & Modify
-
-```bash
-git clone https://github.com/adm-humanerd/drewgent.git
-cd drewgent
-pip install -e .
-```
-
-### Add New Tools
-
-Create a new file in `tools/` (e.g., `tools/my_tool.py`):
-
-```python
-from tools.registry import registry
-
-def my_tool(message: str, task_id: str = None) -> str:
-    return f"Result: {message}"
-
-registry.register(
-    name="my_tool",
-    toolset="custom",
-    schema={
-        "name": "my_tool",
-        "description": "My custom tool",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "message": {"type": "string", "description": "Input message"}
-            },
-            "required": ["message"]
-        }
-    },
-    handler=lambda args, **kw: my_tool(**args, **kw),
-)
-```
-
-Then add the tool to `toolsets.py` in `_HERMES_CORE_TOOLS` or your custom toolset.
-
-### Change Appearance (Skins)
-
-```bash
-/hermes skin ares  # crimson/bronze theme
-/hermes skin mono  # grayscale theme
-/hermes skin slate # blue developer theme
-/hermes skin default  # classic gold theme
-```
-
-### Directory Structure
-
-```
-~/.drewgent/           # User config & data
-├── config.yaml        # Main config
-├── .env               # API keys
-├── memories/          # Persistent memory
-├── skills/            # Custom skills
-└── skins/             # Custom skins (YAML)
-
-drewgent-agent/
-├── tools/             # Tool implementations
-├── drewgent_cli/        # CLI commands
-├── gateway/           # Messaging platforms
-├── agent/             # Core agent logic
-└── skills/            # Built-in skills
-```
-
-### Enable/Disable Tools
-
-```bash
-hermes tools  # Interactive tool selection
-```
-
----
-
-## Community
-
-- 💬 [Discord](https://discord.gg/NousResearch)
-- 📚 [Skills Hub](https://agentskills.io)
-- 🐛 [Issues](https://github.com/adm-humanerd/drewgent/issues)
-- 💡 [Discussions](https://github.com/adm-humanerd/drewgent/discussions)
-
----
+- [Architecture Guide](./docs/DREWGENT_ARCHITECTURE.md) - Full architecture and implementation details
+- [Knowledge Bus](./docs/PDCA_KNOWLEDGE_BUS.md) - Knowledge Bus implementation
+- [Development Guide](./AGENTS.md) - For contributors
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-Built by [HUMANERD](https://humanerd.ai).
+MIT License - HUMANERD

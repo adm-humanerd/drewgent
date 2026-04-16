@@ -4,6 +4,7 @@ set -e
 
 HERMES_HOME="/opt/data"
 INSTALL_DIR="/opt/drewgent"
+export PYTHONPATH="/opt/drewgent"
 
 # Create essential directory structure.  Cache and platform directories
 # (cache/images, cache/audio, platforms/whatsapp, etc.) are created on
@@ -31,4 +32,4 @@ if [ -d "$INSTALL_DIR/skills" ]; then
     python3 "$INSTALL_DIR/tools/skills_sync.py"
 fi
 
-exec drewgent "$@"
+exec python3 -m drewgent_cli.main "$@"
