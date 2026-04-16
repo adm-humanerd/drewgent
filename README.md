@@ -110,7 +110,8 @@ MINIMAX_API_KEY=your_key
 DREW_DISCORD_WEBHOOK=https://discord.com/api/webhooks/YOUR_WEBHOOK
 EOF
 
-# 4. Create docker-compose.yml (see below)
+# 4. Copy docker-compose.yml
+cp docker-compose.yml.example docker-compose.yml
 
 # 5. Start
 docker-compose up -d
@@ -118,50 +119,7 @@ docker-compose up -d
 
 That's it. No `git clone`, no dependency installation, no build steps.
 
-## Docker Compose
-
-```yaml
-services:
-  drewgent-gateway:
-    image: humanerdkr/drewgent:latest
-    container_name: drewgent-gateway
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - ./data:/opt/data
-      - ~/.drewgent:/root/.drewgent:rw
-    env_file:
-      - .env
-    environment:
-      - HERMES_HOME=/opt/data
-      - PYTHONPATH=/opt/drewgent
-    entrypoint: ["bash", "-c", "cd /opt/drewgent && mkdir -p /opt/data && exec python3 -m drewgent_cli.main gateway run"]
-
-  drewgent-agent:
-    image: humanerdkr/drewgent:latest
-    container_name: drewgent-agent
-    restart: unless-stopped
-    network_mode: host
-    entrypoint: ["bash", "-c", "cd /opt/drewgent && mkdir -p /opt/data && exec python3 cli.py agent run"]
-    volumes:
-      - ./data:/opt/data
-      - ~/.drewgent:/root/.drewgent:rw
-    env_file:
-      - .env
-    depends_on:
-      - drewgent-gateway
-
-  monitor:
-    image: humanerdkr/drewgent-monitor:latest
-    container_name: drewgent-monitor
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - ./data:/opt/data
-    environment:
-      - GATEWAY_URL=http://localhost:8642
-      - DREW_DISCORD_WEBHOOK=https://discord.com/api/webhooks/YOUR_WEBHOOK
-```
+> **⚠️ SECURITY:** Never commit your `.env` file or `docker-compose.yml` with real API keys. The example file uses environment variables — keep your secrets safe!
 
 ## Docker Images
 
@@ -236,6 +194,22 @@ Building Drewgent taught us important lessons about **constrained environments**
 3. **VPNs can break DNS**: Tailscale intercepts all DNS queries by default
 4. **Cloudflare Tunnel account isolation**: Always verify which account you're using
 5. **Feedback loops improve quality**: Storing verification results makes the agent smarter over time
+
+## Security
+
+### Best Practices
+
+1. **Never commit secrets**: Your `.env` file contains API keys — never commit it to version control
+2. **Use environment variables**: All secrets are loaded from `.env` or environment variables
+3. **Docker secrets**: Use Docker secrets or environment variables for sensitive data in production
+
+### Files You Need to Create
+
+| File | Contains | GitHub |
+|------|----------|--------|
+| `.env` | API keys, webhook URLs | ❌ Never commit |
+| `docker-compose.yml` | Service config | ✅ Use example |
+| `~/.drewgent/` | User config, memories | ❌ Never commit |
 
 ## License
 
