@@ -1690,6 +1690,86 @@ class AIAgent:
             or self._base_url_lower.rstrip("/").endswith("/anthropic")
         )
 
+        if is_native_anthropic:
+            return True, True
+        if is_openrouter and is_claude:
+            return True, False
+        if is_anthropic_wire and is_claude:
+            # Third-party Anthropic-compatible gateway.
+            return True, True
+
+        # MiniMax on its Anthropic-compatible endpoint serves its own
+        # model family (MiniMax-M2.7, M2.5, M2.1, M2) with documented
+        # cache_control support (0.1× read pricing, 5-minute TTL).  The
+        # blanket is_claude gate above excludes these — opt them in
+        # explicitly via provider id or host match so users on
+        # provider=minimax / minimax-cn (or custom endpoints pointing at
+        # api.minimax.io/anthropic / api.minimaxi.com/anthropic) get the
+        # same cost reduction as Claude traffic.
+        # Docs: https://platform.minimax.io/docs/api-reference/anthropic-api-compatible-cache
+        if is_anthropic_wire:
+            is_minimax_provider = provider_lower in {"minimax", "minimax-cn"}
+            is_minimax_host = (
+                base_url_host_matches(eff_base_url, "api.minimax.io")
+                or base_url_host_matches(eff_base_url, "api.minimaxi.com")
+            )
+            if is_minimax_provider or is_minimax_host:
+                return True, True
+
+        # Qwen/Alibaba on OpenCode (Zen/Go) and native DashScope: OpenAI-wire
+        # transport that accepts Anthropic-style cache_control markers and
+        # rewards them with real cache hits.  Without this branch
+        # qwen3.6-plus on opencode-go reports 0% cached tokens and burns
+        # through the subscription on every turn.
+        model_is_qwen = "qwen" in model_lower
+        provider_is_alibaba_family = provider_lower in {
+            "opencode", "opencode-zen", "opencode-go", "alibaba",
+        }
+        if provider_is_alibaba_family and model_is_qwen:
+            # Envelope layout (native_anthropic=False): markers on inner
+            # content parts, not top-level tool messages.  Matches
+            # pi-mono's "alibaba" cacheControlFormat.
+            return True, False
+
+        return False, False
+
+    @staticmethod
+    def _model_requires_responses_api(model: str) -> bool:
+        """Return True for models that require the Responses API path.
+
+        GPT-5.x models are rejected on /v1/chat/completions by both
+        OpenAI and OpenRouter (error: ``unsupported_api_for_model``).
+        Detect these so the correct api_mode is set regardless of
+        which provider is serving the model.
+        """
+        m = model.lower()
+        # Strip vendor prefix (e.g. "openai/gpt-5.4" → "gpt-5.4")
+        if "/" in m:
+            m = m.rsplit("/", 1)[-1]
+        return m.startswith("gpt-5")
+
+    @staticmethod
+    def _provider_model_requires_responses_api(
+        model: str,
+        *,
+        provider: Optional[str] = None,
+    ) -> bool:
+        """Return True when this provider/model pair should use Responses API."""
+        normalized_provider = (provider or "").strip().lower()
+        # Nous serves GPT-5.x models via its OpenAI-compatible chat
+        # completions endpoint; its /v1/responses endpoint returns 404.
+        if normalized_provider == "nous":
+            return False
+        if normalized_provider == "copilot":
+            try:
+                from hermes_cli.models import _should_use_copilot_responses_api
+                return _should_use_copilot_responses_api(model)
+            except Exception:
+                # Fall back to the generic GPT-5 rule if Copilot-specific
+                # logic is unavailable for any reason.
+                pass
+        return AIAgent._model_requires_responses_api(model)
+
     def _max_tokens_param(self, value: int) -> dict:
         """Return the correct max tokens kwarg for the current provider.
 
