@@ -299,42 +299,14 @@ class BuiltinMemoryProvider(MemoryProvider):
     def sync_turn(
         self, user_content: str, assistant_content: str, *, session_id: str = ""
     ) -> None:
-        """Sync turn and optionally auto-learn from conversation.
+        """No-op — all auto-learning goes through agent/auto_learn.py only.
 
-        When auto_learn is enabled, this method extracts insights from the
-        conversation and saves them to MEMORY.md / USER.md automatically.
+        The BuiltinMemoryProvider handles system-prompt block delivery.
+        Obsidian wiki learning is the single source of truth, managed by
+        the AutoLearner in run_agent.py. No file writes here.
         """
-        self._session_count += 1
-
-        if not self._auto_learn:
-            return
-
-        if not user_content and not assistant_content:
-            return
-
-        # Extract insights
-        user_insights, memory_insights = self._learner.extract_insights(
-            user_content, assistant_content
-        )
-
-        # Limit insights per turn
-        user_insights = user_insights[: self._auto_learn_max]
-        memory_insights = memory_insights[: self._auto_learn_max]
-
-        # Save to files
-        if user_insights and self._store:
-            self._save_insights("user", user_insights)
-
-        if memory_insights and self._store:
-            self._save_insights("memory", memory_insights)
-
-        if user_insights or memory_insights:
-            logger.debug(
-                "AutoLearn: turn %d — saved %d user insights, %d memory insights",
-                self._session_count,
-                len(user_insights),
-                len(memory_insights),
-            )
+        # Delegated entirely to agent/auto_learn.py via
+        # self._agent._auto_learner.learn_from_turn() in run_agent.py
 
     def _save_insights(self, target: str, insights: List[str]) -> None:
         """Save insights to memory store using add()."""

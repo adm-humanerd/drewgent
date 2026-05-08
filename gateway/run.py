@@ -76,7 +76,11 @@ def _ensure_ssl_certs() -> None:
 _ensure_ssl_certs()
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+_PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+from drewgent_cli.runtime_boundary import ensure_source_import_precedence
+ensure_source_import_precedence(_PROJECT_ROOT)
 
 # Resolve Drewgent home directory (respects DREW_HOME override)
 from drewgent_constants import get_drewgent_home
@@ -3779,20 +3783,31 @@ class GatewayRunner:
 
         connected_platforms = [p.value for p in self.adapters.keys()]
 
-        # Check if there's an active agent
+        # Check if there's an active agent (guard against _AGENT_PENDING_SENTINEL)
         session_key = session_entry.session_key
-        is_running = session_key in self._running_agents
+        running_agent = self._running_agents.get(session_key)
+        is_running = running_agent is not None and running_agent is not _AGENT_PENDING_SENTINEL
+
+        # Prefer agent-reported token counts when available
+        if (
+            is_running
+            and hasattr(running_agent, "session_total_tokens")
+            and running_agent.session_api_calls > 0
+        ):
+            tokens_display = f"{running_agent.session_total_tokens:,}"
+        else:
+            tokens_display = f"{session_entry.total_tokens:,}"
 
         lines = [
             "📊 **Drewgent Gateway Status**",
             "",
-            f"**Session ID:** `{session_entry.session_id[:12]}...`",
+            f"**Session ID:** `{session_entry.session_id}`",
             f"**Created:** {session_entry.created_at.strftime('%Y-%m-%d %H:%M')}",
             f"**Last Activity:** {session_entry.updated_at.strftime('%Y-%m-%d %H:%M')}",
-            f"**Tokens:** {session_entry.total_tokens:,}",
+            f"**Tokens:** {tokens_display}",
             f"**Agent Running:** {'Yes ⚡' if is_running else 'No'}",
             "",
-            f"**Connected Platforms:** {', '.join(connected_platforms)}",
+            f"**Platforms:** {', '.join(connected_platforms)}",
         ]
 
         return "\n".join(lines)
@@ -8342,6 +8357,7 @@ def _start_cron_ticker(
 
     IMAGE_CACHE_EVERY = 60  # ticks — once per hour at default 60s interval
     CHANNEL_DIR_EVERY = 5  # ticks — every 5 minutes
+    WIKI_MAINTENANCE_EVERY = 60  # ticks — once per hour at default 60s interval
 
     logger.info("Cron ticker started (interval=%ds)", interval)
     tick_count = 0
@@ -8364,6 +8380,26 @@ def _start_cron_ticker(
         if tick_count % IMAGE_CACHE_EVERY == 0:
             try:
                 removed = cleanup_image_cache(max_age_hours=24)
+            except Exception:
+                pass
+
+        # Wiki maintenance: keep the brain healthy without user interaction
+        if tick_count % WIKI_MAINTENANCE_EVERY == 0:
+            try:
+                from agent.auto_learn import AutoLearner
+                from drewgent_constants import get_drewgent_home
+                wiki_path = get_drewgent_home() / 'memories'
+                if wiki_path.exists():
+                    learner = AutoLearner(enabled=True)
+                    learner.enable(wiki_path)
+                    result = learner.run_maintenance(dry_run=False)
+                    logger.debug("Wiki maintenance tick: retire=%d dedup=%d gaps=%s",
+                        result.get('retire', {}).get('retired', 0),
+                        result.get('dedup', {}).get('duplicates_removed', 0),
+                        result.get('gaps_detected', []),
+                    )
+            except Exception as e:
+                logger.debug("Wiki maintenance tick error: %s", e)
                 if removed:
                     logger.info(
                         "Image cache cleanup: removed %d stale file(s)", removed

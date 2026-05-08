@@ -11,7 +11,7 @@
 1. [Overview](#overview)
 2. [Architecture](#architecture)
 3. [Docker Deployment](#docker-deployment)
-4. [Knowledge Bus & Feedback Loop](#knowledge-bus--feedback-loop)
+4. [Brain System & Feedback Loop](#brain-system--feedback-loop)
 5. [Module Connections](#module-connections)
 6. [Monitoring & Observability](#monitoring--observability)
 7. [Optimization Decisions](#optimization-decisions)
@@ -23,7 +23,7 @@
 
 ## Overview
 
-Drewgent is a personal AI agent system built on the HUMANERD architecture. It combines multiple specialized modules (VerificationEngine, GrowthEngine, RevisionLoop, KnowledgeBus) into a unified agent that runs as a Docker-based service.
+Drewgent is a personal AI agent system built on the HUMANERD architecture. It combines multiple specialized modules (VerificationEngine, GrowthEngine, RevisionLoop, AutoLearner) into a unified agent that runs as a Docker-based service.
 
 ### Key Design Principles
 
@@ -41,16 +41,10 @@ Drewgent is a personal AI agent system built on the HUMANERD architecture. It co
 │                        Drewgent Agent                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
-│  │   Gateway   │  │   Agent     │  │    Knowledge Bus       │ │
+│  │   Gateway   │  │   Agent     │  │    Brain System       │ │
 │  │  (Message   │──│  (Core AI)  │──│  ┌─────────────────┐    │ │
-│  │   Router)   │  │             │  │  │ Verification    │    │ │
-│  └─────────────┘  └─────────────┘  │  │ Engine         │    │ │
-│         │                │         │  ├─────────────────┤    │ │
-│         │                │         │  │ Growth         │    │ │
-│         │                │         │  │ Engine         │    │ │
-│         │                │         │  ├─────────────────┤    │ │
-│         │                │         │  │ Revision        │    │ │
-│         │                │         │  │ Loop           │    │ │
+│  │   Router)   │  │             │  │  │ AutoLearner    │    │ │
+│  └─────────────┘  └─────────────┘  │  │ (wiki-based)   │    │ │
 │         │                │         │  └─────────────────┘    │ │
 │         │                │         └─────────────────────────┘ │
 │         │                │                    │                │
@@ -67,7 +61,8 @@ Drewgent is a personal AI agent system built on the HUMANERD architecture. It co
 |----------|---------|----------|
 | **Gateway** | Message routing, platform adapters (Discord, Telegram, etc.) | `gateway/run.py` |
 | **Agent** | Core AI processing, tool orchestration | `run_agent.py` |
-| **KnowledgeBus** | Central knowledge store, singleton pattern | `modules/knowledge_bus.py` |
+| **AutoLearner** | Passive + active learning, wiki-based knowledge base | `agent/auto_learn.py` |
+| **Brain Tools** | Agent's active access to its own knowledge | `tools/brain_tool.py` |
 | **VerificationEngine** | Response validation, quality gates | `modules/verification_engine.py` |
 | **GrowthEngine** | Pattern discovery, learning | `modules/growth_engine.py` |
 | **RevisionLoop** | LLM re-calling for revisions | `modules/revision_loop.py` |
@@ -152,7 +147,7 @@ docker push humanerdkr/drewgent-monitor:latest
 
 ---
 
-## Knowledge Bus & Feedback Loop
+## Brain System & Feedback Loop
 
 ### The Feedback Loop Concept
 
@@ -160,42 +155,75 @@ docker push humanerdkr/drewgent-monitor:latest
 ┌──────────────────────────────────────────────────────────────┐
 │                    FEEDBACK LOOP                             │
 │                                                              │
-│  Action → Verification → Knowledge → Better Action         │
+│  Action → Verification → Brain → Better Action         │
 │                                                              │
 │  1. User message arrives                                    │
 │  2. Agent generates response                                │
 │  3. VerificationEngine checks quality                      │
-│  4. Result stored in KnowledgeBus                          │
-│  5. Future verifications query past patterns               │
+│  4. AutoLearner extracts patterns from turn               │
+│  5. Future queries use brain_query + wiki context         │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### Knowledge Bus Structure
+### Brain System Structure
 
-```python
-# modules/knowledge_bus.py
-class KnowledgeBus:
-    """Singleton pattern - one shared knowledge store"""
-    
-    def store(knowledge: dict) -> None:
-        """Store verification results, patterns, insights"""
-        
-    def query(tags: list = None, source: str = None, 
-              min_confidence: float = 0.0) -> list:
-        """Query past knowledge for context"""
-        
-    def get_stats() -> dict:
-        """Return aggregated statistics"""
+The brain system consists of two layers:
+
+**1. AutoLearner (`agent/auto_learn.py`)** — passive + active learning
+- Passive: `learn_from_turn()` extracts patterns after each conversation turn
+- Active: `save_insight()` records explicit agent decisions
+- Output: Obsidian wiki at `~/.drewgent/memories/` (entities/, concepts/, insights/)
+- Semantic: embeddings stored for similarity search when text match is insufficient
+
+**2. Brain Tools (`tools/brain_tool.py`)** — agent's active access
+- `brain_query`: agent queries wiki during reasoning for relevant context
+- `brain_record`: agent explicitly saves knowledge worth remembering
+- Both are regular registry tools (not agent-level interceptors)
+
+**Injection pipeline** (in `run_agent.py`):
+```
+user message → brain_query → <brain_context> tag injected into user message
+turn ends → AutoLearner.learn_from_turn() → wiki updated
 ```
 
-### Knowledge Types
+```python
+# agent/auto_learn.py
+class AutoLearner:
+    def learn_from_turn(self, user_text, assistant_text) -> (int, int):
+        """Passive extraction from conversation. Returns (user_insights, memory_insights)."""
+
+    def save_insight(self, insight: Insight) -> bool:
+        """Explicit save from brain_record tool."""
+
+    def query_wiki(self, query, context, max_results, max_chars) -> str:
+        """Active query used by brain_query tool."""
+```
+
+### Knowledge Types (Brain System)
 
 | Type | Source | Description |
 |------|--------|-------------|
-| `verification_result` | VerificationEngine | Approved/revised/rejected responses |
-| `check_failure` | VerificationEngine | Failed rule checks (e.g., korean_first, completeness) |
-| `growth_pattern` | GrowthEngine | Discovered patterns in behavior |
+| `preference` | AutoLearner pattern extraction | User likes/dislikes expressed in conversation |
+| `correction` | AutoLearner pattern extraction | User corrections or negative feedback |
+| `tool` | AutoLearner + brain_record | Tool usage patterns, commands that worked |
+| `project` | brain_record | Project-specific context saved by agent |
+| `anti_preference` | AutoLearner | Negative patterns (avoid this approach) |
+
+> Note: The old `KnowledgeBus` singleton (v1.0, 2026-04-15) is deprecated.
+> The current brain system uses the Obsidian wiki at `~/.drewgent/memories/` with
+> `AutoLearner` as the core engine.
+
+### Wiki Maintenance (Autonomous)
+
+Session-end maintenance keeps the wiki healthy without user intervention:
+
+```python
+# AutoLearner.run_maintenance() — called automatically at session end
+# 1. retire_stale_entries() — files untouched 90+ days → retired/
+# 2. deduplicate_wiki() — duplicate daily log entries merged
+# 3. detect_knowledge_gaps() — topics tracked but lacking wiki coverage
+```
 
 ### Verification Engine Integration
 
@@ -204,17 +232,12 @@ class KnowledgeBus:
 def verify_and_process_response(user_message, response, context):
     """
     1. Run verification checks
-    2. Store result in KnowledgeBus
+    2. AutoLearner extracts patterns from turn
     3. Return verification result
     """
     result = VerificationEngine.verify(response, context)
-    KnowledgeBus.store({
-        "source": "verification_engine",
-        "type": "verification_result" if result.passed else "check_failure",
-        "content": result.details,
-        "confidence": result.score,
-        "tags": result.tags
-    })
+    # AutoLearner extracts patterns from the turn passively
+    AutoLearner.learn_from_turn(user_message, assistant_text)
     return result
 ```
 
@@ -228,22 +251,18 @@ def verify_and_process_response(user_message, response, context):
 |----------|--------|-------------|
 | `/health` | GET | Health check |
 | `/v1/metrics` | GET | Verification statistics |
-| `/v1/knowledge` | GET | Knowledge Bus data |
-| `/v1/models` | GET | Available models |
-| `/dashboard` | GET | HTML monitoring dashboard |
+| `/v1/knowledge` | GET | Brain wiki query (AutoLearner) |
 
 ### Module Dependency Chain
 
 ```
-KnowledgeBus (singleton, no dependencies)
+AutoLearner (wiki-based knowledge, no external dependencies)
     ↑
-VerificationEngine (stores/queries KnowledgeBus)
+Agent (uses AutoLearner for brain_query + learn_from_turn)
     ↑
-GrowthEngine (stores/queries KnowledgeBus)
-    ↑
-RevisionLoop (queries KnowledgeBus for context)
-    ↑
-Agent (uses all modules)
+VerificationEngine (standalone verification)
+GrowthEngine (standalone pattern discovery)
+RevisionLoop (standalone revision)
     ↑
 Gateway (routes messages to Agent)
 ```
@@ -302,11 +321,11 @@ Located at `scripts/drewgent_monitor.py`, this script:
   - pass rate percentage
   - average score
   - P0 blocks (hallucination, safety)
-- Knowledge Bus (/v1/knowledge)
-  - total patterns
-  - by source and type
-  - average confidence
-  - recent patterns
+- Knowledge Brain (wiki entries)
+  - total entries
+  - by category (entities, concepts, insights)
+  - recent entries
+  - by insight type
 - Models (/v1/models)
 ```
 
@@ -361,20 +380,20 @@ volumes:
 - Avoid DNS resolution problems
 - Direct port access
 
-### 4. Singleton KnowledgeBus
+### 4. Brain System: Wiki-Based Knowledge
 
-**Problem**: Multiple module instances creating inconsistent state.
-
-**Solution**: Singleton pattern ensures one shared knowledge store:
+**Design**: The brain uses Obsidian wiki files at `~/.drewgent/memories/` instead of
+a singleton in-memory store. This provides persistence, human readability, and
+bidirectional sync with Obsidian itself.
 
 ```python
-_knowledge_bus_instance = None
+# AutoLearner writes to wiki files
+wiki_path = get_drewgent_home() / "memories"  # entities/, concepts/, insights/
+AutoLearner(wiki_path=wiki_path, enabled=True)
 
-def get_knowledge_bus():
-    global _knowledge_bus_instance
-    if _knowledge_bus_instance is None:
-        _knowledge_bus_instance = KnowledgeBus()
-    return _knowledge_bus_instance
+# Brain tools give the agent active access
+# brain_query → searches wiki, returns relevant entries
+# brain_record → writes new insight to wiki
 ```
 
 ### 5. RevisionLoop Model Selection
@@ -439,7 +458,7 @@ def save_state(state: dict) -> None:
 # Good: Single responsibility
 def verify_and_process_response(user_message, response, context):
     result = VerificationEngine.verify(response, context)
-    KnowledgeBus.store(result.to_dict())
+    AutoLearner.learn_from_turn(user_message, response)
     return result
 
 # Bad: Mixing concerns
@@ -494,13 +513,17 @@ curl -X POST -H "Content-Type: application/json" \
   https://discord.com/api/webhooks/YOUR_WEBHOOK_URL
 ```
 
-### Knowledge Bus Empty
+### Brain Wiki Empty
 
 ```bash
-# Check knowledge file
-cat data/drewgent_knowledge.json | jq '.knowledge_store | length'
+# Check wiki directory
+ls -la ~/.drewgent/memories/
 
-# Query knowledge via API
+# Check wiki entries
+ls ~/.drewgent/memories/entities/
+ls ~/.drewgent/memories/insights/
+
+# Query brain via API
 curl http://localhost:8642/v1/knowledge
 ```
 

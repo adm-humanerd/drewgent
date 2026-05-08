@@ -214,7 +214,36 @@ The registry handles schema collection, dispatch, availability checking, and err
 
 **State files**: If a tool stores persistent state (caches, logs, checkpoints), use `get_drewgent_home()` for the base directory — never `Path.home() / ".hermes"`. This ensures each profile gets its own state.
 
-**Agent-level tools** (todo, memory): intercepted by `run_agent.py` before `handle_function_call()`. See `todo_tool.py` for the pattern.
+**Brain tools example** (`tools/brain_tool.py`):
+brain_tool registers two tools — `brain_query` and `brain_record` — giving the agent
+active bidirectional access to its wiki-based knowledge base. Unlike most tools which
+perform an action and return a result, brain tools query/record structured knowledge
+in the Obsidian wiki at `~/.drewgent/memories/`. See `tools/brain_tool.py` for the
+implementation pattern.
+
+**Brain maintenance** (`agent/auto_learn.py`):
+The `WikiMaintenance` class provides autonomous wiki health operations:
+- `retire_stale_entries()` — decision-matrix retirement (180d hard, 90d cold, 120d low-engagement)
+- `deduplicate_wiki()` — removes duplicate daily log entries (normalized comparison)
+- `detect_knowledge_gaps()` — identifies tracked topics without wiki coverage
+- `run_autonomous_maintenance()` — runs all three with a single call
+
+`AutoLearner.run_maintenance()` is called automatically at `shutdown_memory_provider()`
+(session end) and also from the gateway cron ticker (every ~1 hour when gateway is running),
+keeping the wiki healthy without requiring user intervention.
+
+Access tracking: `query_wiki()` records which entries are returned via `_touch_result_ids()`,
+updating `last_accessed` + `access_count` in the vector store. `Insight.should_retire()`
+uses access frequency alongside file age for smarter retirement decisions.
+
+Knowledge gap system: `detect_knowledge_gaps()` finds missing topics.
+`get_growth_suggestions()` + `fill_gap()` let the agent proactively explore and fill gaps.
+`query_wiki()` falls back to gap suggestions when no direct match is found.
+
+**Agent-level tools** (todo, memory): intercepted by `run_agent.py` before
+`handle_function_call()` — these are internal agent mechanisms, not external tools.
+See `todo_tool.py` for the pattern. Brain tools are NOT agent-level tools; they
+are regular registry tools like any other.
 
 ---
 

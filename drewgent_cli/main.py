@@ -69,7 +69,8 @@ def _require_tty(command_name: str) -> None:
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # ---------------------------------------------------------------------------
 # Profile override — MUST happen before any drewgent module import.
@@ -135,6 +136,9 @@ def _apply_profile_override() -> None:
                     break
 
 _apply_profile_override()
+
+from drewgent_cli.runtime_boundary import ensure_source_import_precedence
+ensure_source_import_precedence(PROJECT_ROOT)
 
 # Load .env from ~/.drewgent/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.

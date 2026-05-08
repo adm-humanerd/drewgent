@@ -50,6 +50,8 @@ _HERMES_CORE_TOOLS = [
     "text_to_speech",
     # Planning & memory
     "todo", "memory",
+    # Brain knowledge graph
+    "brain_query", "brain_record", "brain_search", "brain_stats",
     # Session history search
     "session_search",
     # Clarifying questions
@@ -238,6 +240,7 @@ TOOLSETS = {
             "browser_press", "browser_get_images",
             "browser_vision", "browser_console",
             "todo", "memory",
+            "brain_query", "brain_record", "brain_search", "brain_stats",
             "session_search",
             "execute_code", "delegate_task",
         ],
@@ -264,6 +267,7 @@ TOOLSETS = {
             "browser_vision", "browser_console",
             # Planning & memory
             "todo", "memory",
+            "brain_query", "brain_record", "brain_search", "brain_stats",
             # Session history search
             "session_search",
             # Code execution + delegation

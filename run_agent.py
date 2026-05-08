@@ -1160,7 +1160,13 @@ class AIAgent:
                         _auto_learn_path = mem_config.get("auto_learn_wiki_path")
                         if not _auto_learn_path:
                             _auto_learn_path = _drewgent_home / "memories"
-                        _wiki_path = Path(str(_auto_learn_path))
+                        # Expand ~ to home directory
+                        _wiki_path = Path(os.path.expanduser(str(_auto_learn_path)))
+
+                        # Wiki context settings for bidirectional sync
+                        self._wiki_context_enabled = mem_config.get("wiki_context_enabled", True)
+                        self._wiki_context_max_entries = int(mem_config.get("wiki_context_max_entries", 10))
+                        self._wiki_context_max_chars = int(mem_config.get("wiki_context_max_chars", 4000))
 
                         self._auto_learner = AutoLearner(
                             wiki_path=_wiki_path,
@@ -2893,6 +2899,17 @@ class AIAgent:
         manager. NOT called per-turn — only at CLI exit, /reset, gateway
         session expiry, etc.
         """
+        # Deep reflection: session-end auto-learning via AutoLearner
+        if self._auto_learner and messages:
+            try:
+                self._auto_learner.on_session_end(messages)
+            except Exception:
+                pass
+            try:
+                self._auto_learner.run_maintenance()
+            except Exception:
+                pass
+
         if self._memory_manager:
             try:
                 self._memory_manager.on_session_end(messages or [])
@@ -3069,6 +3086,21 @@ class AIAgent:
             except Exception:
                 pass
 
+        # Wiki knowledge base context (Obsidian bidirectional sync)
+        # Reads recent entries from entities/, concepts/, insights/ for context
+        if self._auto_learner and self._auto_learner.is_enabled:
+            try:
+                _wiki_context_enabled = getattr(self, "_wiki_context_enabled", True)
+                if _wiki_context_enabled:
+                    _wiki_context = self._auto_learner.read_wiki_for_context(
+                        max_entries=getattr(self, "_wiki_context_max_entries", 10),
+                        max_chars=getattr(self, "_wiki_context_max_chars", 4000),
+                    )
+                    if _wiki_context:
+                        prompt_parts.append(_wiki_context)
+            except Exception:
+                pass
+
         has_skills_tools = any(
             name in self.valid_tool_names
             for name in ["skills_list", "skill_view", "skill_manage"]
@@ -3102,6 +3134,13 @@ class AIAgent:
             )
             if context_files_prompt:
                 prompt_parts.append(context_files_prompt)
+
+        # Project context: load from ~/.drewgent/projects/<name>/.brain/ if set
+        if not self.skip_context_files:
+            from agent.project_context import build_project_context_prompt
+            project_context = build_project_context_prompt()
+            if project_context:
+                prompt_parts.append(project_context)
 
         from drewgent_time import now as _drewgent_now
 
@@ -8205,6 +8244,21 @@ class AIAgent:
             except Exception:
                 pass
 
+        # Brain context: query the agent's knowledge base for relevant information.
+        # Injected into the user message alongside memory prefetch cache.
+        # Uses original_user_message (clean input) to avoid bloating the query.
+        _brain_context = ""
+        if self._auto_learner and self._auto_learner.is_enabled:
+            try:
+                _brain_context = self._auto_learner.query_wiki(
+                    query=original_user_message if isinstance(original_user_message, str) else "",
+                    context="current conversation",
+                    max_results=3,
+                    max_chars=800,
+                ) or ""
+            except Exception:
+                pass
+
         while (
             api_call_count < self.max_iterations and self.iteration_budget.remaining > 0
         ):
@@ -8291,6 +8345,10 @@ class AIAgent:
                             _injections.append(_fenced)
                     if _plugin_user_context:
                         _injections.append(_plugin_user_context)
+                    if _brain_context:
+                        _injections.append(
+                            f"<brain_context>\n{_brain_context}\n</brain_context>"
+                        )
                     if _injections:
                         _base = api_msg.get("content", "")
                         if isinstance(_base, str):

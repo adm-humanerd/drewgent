@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
@@ -182,6 +183,35 @@ def _ensure_default_soul_md(home: Path) -> None:
     _secure_file(soul_path)
 
 
+def _ensure_runtime_ontology(home: Path) -> None:
+    """Create minimal P5/P6 runtime ontology without overwriting user state."""
+    p5_config = home / "P5-ego" / "config"
+    p5_config.mkdir(parents=True, exist_ok=True)
+    _secure_dir(p5_config)
+    profile_state = p5_config / "profile_state.json"
+    if not profile_state.exists():
+        profile_state.write_text(
+            json.dumps(
+                {
+                    "layer": "P5-ego",
+                    "purpose": "identity, preferences, and active profile state",
+                    "schema_version": 1,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        _secure_file(profile_state)
+
+    p6 = home / "P6-prefrontal"
+    for subdir in ("plans", "incidents", "migrations", "recovery-journal"):
+        path = p6 / subdir
+        path.mkdir(parents=True, exist_ok=True)
+        _secure_dir(path)
+
+
 def ensure_drewgent_home():
     """Ensure ~/.drewgent directory structure exists with secure permissions."""
     home = get_drewgent_home()
@@ -192,6 +222,7 @@ def ensure_drewgent_home():
         d.mkdir(parents=True, exist_ok=True)
         _secure_dir(d)
     _ensure_default_soul_md(home)
+    _ensure_runtime_ontology(home)
 
 
 # =============================================================================

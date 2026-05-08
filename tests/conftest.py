@@ -26,6 +26,24 @@ def _isolate_drewgent_home(tmp_path, monkeypatch):
     (fake_home / "memories").mkdir()
     (fake_home / "skills").mkdir()
     monkeypatch.setenv("DREW_HOME", str(fake_home))
+    try:
+        import drewgent_constants as _drewgent_constants
+        monkeypatch.setattr(
+            _drewgent_constants,
+            "get_drewgent_home",
+            lambda: Path(os.environ.get("DREW_HOME", str(fake_home))),
+        )
+    except Exception:
+        pass
+    try:
+        import gateway.status as _gateway_status
+        monkeypatch.setattr(
+            _gateway_status,
+            "get_drewgent_home",
+            lambda: Path(os.environ.get("DREW_HOME", str(fake_home))),
+        )
+    except Exception:
+        pass
     # Reset plugin singleton so tests don't leak plugins from ~/.drewgent/plugins/
     try:
         import drewgent_cli.plugins as _plugins_mod
@@ -86,7 +104,7 @@ def _ensure_current_event_loop(request):
         return
 
     try:
-        loop = asyncio.get_event_loop_policy().get_event_loop()
+        loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = None
 

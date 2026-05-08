@@ -80,6 +80,9 @@ COMMAND_REGISTRY: list[CommandDef] = [
                gateway_only=True, aliases=("set-home",)),
     CommandDef("resume", "Resume a previously-named session", "Session",
                args_hint="[name]"),
+    CommandDef("project", "Manage project context: /project [name|list|create|status]", "Session",
+               args_hint="[name|list|create|status]",
+               subcommands=("list", "create", "status")),
 
     # Configuration
     CommandDef("config", "Show current configuration", "Configuration",

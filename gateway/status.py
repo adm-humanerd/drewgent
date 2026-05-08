@@ -37,12 +37,11 @@ def _get_runtime_status_path() -> Path:
 
 
 def _get_lock_dir() -> Path:
-    """Return the machine-local directory for token-scoped gateway locks."""
+    """Return the Drewgent runtime directory for token-scoped gateway locks."""
     override = os.getenv("DREW_GATEWAY_LOCK_DIR")
     if override:
         return Path(override)
-    state_home = Path(os.getenv("XDG_STATE_HOME", Path.home() / ".local" / "state"))
-    return state_home / "drewgent" / _LOCKS_DIRNAME
+    return get_drewgent_home() / "run" / _LOCKS_DIRNAME
 
 
 def _utc_now_iso() -> str:
@@ -196,14 +195,18 @@ def write_runtime_status(
     """Persist gateway runtime health information for diagnostics/status."""
     path = _get_runtime_status_path()
     payload = _read_json_file(path) or _build_runtime_status_record()
+    current_process = _build_pid_record()
     payload.setdefault("platforms", {})
-    payload.setdefault("kind", _GATEWAY_KIND)
-    payload["pid"] = os.getpid()
-    payload["start_time"] = _get_process_start_time(os.getpid())
+    payload["kind"] = current_process["kind"]
+    payload["pid"] = current_process["pid"]
+    payload["argv"] = current_process["argv"]
+    payload["start_time"] = current_process["start_time"]
     payload["updated_at"] = _utc_now_iso()
 
     if gateway_state is not None:
         payload["gateway_state"] = gateway_state
+        if gateway_state == "starting":
+            payload["platforms"] = {}
     if exit_reason is not None:
         payload["exit_reason"] = exit_reason
 
@@ -211,6 +214,9 @@ def write_runtime_status(
         platform_payload = payload["platforms"].get(platform, {})
         if platform_state is not None:
             platform_payload["state"] = platform_state
+            if platform_state == "connected" and error_code is None and error_message is None:
+                platform_payload.pop("error_code", None)
+                platform_payload.pop("error_message", None)
         if error_code is not None:
             platform_payload["error_code"] = error_code
         if error_message is not None:
@@ -242,15 +248,19 @@ def acquire_scoped_lock(scope: str, identity: str, metadata: Optional[dict[str, 
     """
     lock_path = _get_scope_lock_path(scope, identity)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
+    now = _utc_now_iso()
     record = {
         **_build_pid_record(),
         "scope": scope,
         "identity_hash": _scope_hash(identity),
         "metadata": metadata or {},
-        "updated_at": _utc_now_iso(),
+        "created_at": now,
+        "heartbeat_at": now,
+        "updated_at": now,
     }
 
     existing = _read_json_file(lock_path)
+    stale_record = None
     if existing:
         try:
             existing_pid = int(existing["pid"])
@@ -258,15 +268,22 @@ def acquire_scoped_lock(scope: str, identity: str, metadata: Optional[dict[str, 
             existing_pid = None
 
         if existing_pid == os.getpid() and existing.get("start_time") == record.get("start_time"):
+            now = _utc_now_iso()
+            previous = dict(existing)
+            record["created_at"] = existing.get("created_at", now)
+            record["heartbeat_at"] = now
+            record["updated_at"] = now
             _write_json_file(lock_path, record)
-            return True, existing
+            return True, previous
 
         stale = existing_pid is None
         if not stale:
             try:
                 os.kill(existing_pid, 0)
-            except (ProcessLookupError, PermissionError):
+            except ProcessLookupError:
                 stale = True
+            except PermissionError:
+                stale = False
             else:
                 current_start = _get_process_start_time(existing_pid)
                 if (
@@ -275,9 +292,6 @@ def acquire_scoped_lock(scope: str, identity: str, metadata: Optional[dict[str, 
                     and current_start != existing.get("start_time")
                 ):
                     stale = True
-                # Check if process is stopped (Ctrl+Z / SIGTSTP) — stopped
-                # processes still respond to os.kill(pid, 0) but are not
-                # actually running. Treat them as stale so --replace works.
                 if not stale:
                     try:
                         _proc_status = Path(f"/proc/{existing_pid}/status")
@@ -285,12 +299,13 @@ def acquire_scoped_lock(scope: str, identity: str, metadata: Optional[dict[str, 
                             for _line in _proc_status.read_text().splitlines():
                                 if _line.startswith("State:"):
                                     _state = _line.split()[1]
-                                    if _state in ("T", "t"):  # stopped or tracing stop
+                                    if _state in ("T", "t"):
                                         stale = True
                                     break
                     except (OSError, PermissionError):
                         pass
         if stale:
+            stale_record = dict(existing) if existing else None
             try:
                 lock_path.unlink(missing_ok=True)
             except OSError:
@@ -311,7 +326,7 @@ def acquire_scoped_lock(scope: str, identity: str, metadata: Optional[dict[str, 
         except OSError:
             pass
         raise
-    return True, None
+    return True, stale_record
 
 
 def release_scoped_lock(scope: str, identity: str) -> None:
@@ -330,22 +345,87 @@ def release_scoped_lock(scope: str, identity: str) -> None:
         pass
 
 
+def _is_process_alive(pid: int, start_time: Optional[int]) -> bool:
+    """Return True if the process is alive and matches the recorded start_time."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    current_start = _get_process_start_time(pid)
+    if start_time is not None and current_start is not None and current_start != start_time:
+        return False
+    return True
+
+
+def _is_live_drewgent_gateway_lock(record: dict[str, Any]) -> bool:
+    """Return True if the lock belongs to a live Drewgent gateway process."""
+    pid = record.get("pid")
+    start_time = record.get("start_time")
+    if pid is None:
+        return False
+    if not _is_process_alive(pid, start_time):
+        return False
+    cmdline = _read_process_cmdline(pid)
+    if cmdline:
+        patterns = (
+            "drewgent_cli.main gateway",
+            "drewgent_cli/main.py gateway",
+            "drewgent gateway",
+            "gateway/run.py",
+        )
+        if any(pattern in cmdline for pattern in patterns):
+            return True
+    if _record_looks_like_gateway(record):
+        return True
+    return False
+
+
 def release_all_scoped_locks() -> int:
-    """Remove all scoped lock files in the lock directory.
+    """Remove stale locks and locks owned by the current process.
 
     Called during --replace to clean up stale locks left by stopped/killed
     gateway processes that did not release their locks gracefully.
     Returns the number of lock files removed.
+    Does NOT remove live locks belonging to other Drewgent gateway processes.
     """
     lock_dir = _get_lock_dir()
     removed = 0
-    if lock_dir.exists():
-        for lock_file in lock_dir.glob("*.lock"):
+    if not lock_dir.exists():
+        return removed
+    for lock_file in lock_dir.glob("*.lock"):
+        try:
+            record = _read_json_file(lock_file)
+        except Exception:
+            continue
+        if not record:
             try:
                 lock_file.unlink(missing_ok=True)
                 removed += 1
             except OSError:
                 pass
+            continue
+        try:
+            pid = int(record["pid"])
+        except (KeyError, TypeError, ValueError):
+            pid = None
+        start_time = record.get("start_time")
+        is_own = pid == os.getpid() and start_time == _get_process_start_time(os.getpid())
+        if is_own:
+            try:
+                lock_file.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                pass
+            continue
+        if _is_live_drewgent_gateway_lock(record):
+            continue
+        try:
+            lock_file.unlink(missing_ok=True)
+            removed += 1
+        except OSError:
+            pass
     return removed
 
 

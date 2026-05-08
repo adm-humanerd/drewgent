@@ -948,9 +948,13 @@ def systemd_status(deep: bool = False, system: bool = False):
 # =============================================================================
 
 def get_launchd_label() -> str:
-    """Return the launchd service label, scoped per profile."""
+    """Return the launchd service label, scoped per profile.
+
+    Returns 'ai.custom-agent.gateway' (canonical) with legacy fallback
+    'ai.drewgent.gateway' for migration compatibility.
+    """
     suffix = _profile_suffix()
-    return f"ai.drewgent.gateway-{suffix}" if suffix else "ai.drewgent.gateway"
+    return f"ai.custom-agent.gateway{suffix and f'-{suffix}' or ''}"
 
 
 def _launchd_domain() -> str:

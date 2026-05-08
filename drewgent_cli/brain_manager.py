@@ -95,6 +95,12 @@ class Brain:
     total_neurons: int = 0
     bombed_count: int = 0
 
+    def load(self) -> "Brain":
+        """Load brain content from disk (idempotent - already in-memory after scan)."""
+        # Brain is already populated by scan_brain() which calls _scan_layer recursively.
+        # This method exists for API compatibility with code that expects a load() method.
+        return self
+
 
 # =============================================================================
 # Path Helpers

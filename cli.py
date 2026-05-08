@@ -3425,6 +3425,88 @@ class DrewgentCLI:
         else:
             _cprint(f"  ↻ Resumed session {target_id}{title_part} — no messages, starting fresh.")
 
+    def _handle_project_command(self, cmd_original: str) -> None:
+        """Handle /project [name|list|create|status] — manage project context.
+
+        Sets the current project for the session, loading its context
+        (workdir, permission boundaries, failure patterns) into the agent.
+        """
+        from agent.project_context import ProjectContextManager, save_current_project, get_current_project_name
+
+        parts = cmd_original.split(None, 1)
+        subcommand = parts[1].strip() if len(parts) > 1 else ""
+
+        # Parse subcommand or project name
+        if not subcommand or subcommand == "status":
+            # Show current project status
+            current = get_current_project_name()
+            if current:
+                manager = ProjectContextManager()
+                ctx = manager.get_project_context(current)
+                if ctx:
+                    _cprint(f"  📁 Current project: {current}")
+                    if ctx.get("workdir"):
+                        _cprint(f"     Workdir: {ctx['workdir']}")
+                    if ctx.get("permission_boundary"):
+                        _cprint(f"     Permission boundary: {ctx['permission_boundary']}")
+                    patterns = ctx.get("failure_patterns", [])
+                    if patterns:
+                        _cprint(f"     Failure patterns: {len(patterns)}")
+                    notes = ctx.get("linked_notes", [])
+                    if notes:
+                        _cprint(f"     Linked notes: {', '.join(notes)}")
+                else:
+                    _cprint(f"  Project '{current}' not found.")
+            else:
+                _cprint("  No project set. Use /project <name> to set a project.")
+            return
+
+        if subcommand == "list":
+            manager = ProjectContextManager()
+            projects = manager.list_projects()
+            if projects:
+                _cprint(f"  Projects ({len(projects)}):")
+                for p in projects:
+                    _cprint(f"    - {p}")
+            else:
+                _cprint("  No projects found. Create one with /project create <name>")
+            return
+
+        if subcommand.startswith("create "):
+            name = subcommand[7:].strip()
+            if not name:
+                _cprint("  Usage: /project create <name>")
+                return
+            manager = ProjectContextManager()
+            path = manager.create_project(name)
+            save_current_project(name)
+            _cprint(f"  ✓ Created project '{name}' at {path}")
+            _cprint(f"  ✓ Switched to project '{name}'")
+            return
+
+        # Assume subcommand is a project name - switch to it
+        project_name = subcommand
+        manager = ProjectContextManager()
+        if not manager.project_exists(project_name):
+            _cprint(f"  Project '{project_name}' not found.")
+            _cprint(f"  Create it with: /project create {project_name}")
+            return
+
+        save_current_project(project_name)
+        ctx = manager.get_project_context(project_name)
+        if ctx:
+            _cprint(f"  ✓ Switched to project '{project_name}'")
+            if ctx.get("workdir"):
+                _cprint(f"     Workdir: {ctx['workdir']}")
+            patterns = ctx.get("failure_patterns", [])
+            if patterns:
+                _cprint(f"     {len(patterns)} failure pattern(s) loaded")
+            notes = ctx.get("linked_notes", [])
+            if notes:
+                _cprint(f"     {len(notes)} linked note(s)")
+        else:
+            _cprint(f"  ✓ Switched to project '{project_name}' (no context yet)")
+
     def _handle_branch_command(self, cmd_original: str) -> None:
         """Handle /branch [name] — fork the current session into a new independent copy.
 
@@ -4421,6 +4503,8 @@ class DrewgentCLI:
             self.new_session()
         elif canonical == "resume":
             self._handle_resume_command(cmd_original)
+        elif canonical == "project":
+            self._handle_project_command(cmd_original)
         elif canonical == "model":
             self._handle_model_switch(cmd_original)
         elif canonical == "provider":

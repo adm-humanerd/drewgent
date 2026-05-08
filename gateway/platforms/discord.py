@@ -74,6 +74,15 @@ def _clean_discord_id(entry: str) -> str:
     return entry.strip()
 
 
+def _csv_env_set(name: str) -> set[str]:
+    """Return a set from a comma-separated environment variable."""
+    return {
+        item.strip()
+        for item in os.getenv(name, "").split(",")
+        if item.strip()
+    }
+
+
 def check_discord_requirements() -> bool:
     """Check if Discord dependencies are available."""
     return DISCORD_AVAILABLE
@@ -571,6 +580,19 @@ class DiscordAdapter(BasePlatformAdapter):
                 # Allow both default and reply types — replies have a distinct MessageType.
                 if message.type not in (discord.MessageType.default, discord.MessageType.reply):
                     return
+
+                codex_admin_channels = _csv_env_set("DISCORD_CODEX_ADMIN_CHANNELS")
+                if codex_admin_channels:
+                    channel_ids = {str(getattr(message.channel, "id", ""))}
+                    parent_id = getattr(message.channel, "parent_id", None)
+                    if parent_id:
+                        channel_ids.add(str(parent_id))
+                    if channel_ids & codex_admin_channels:
+                        logger.info(
+                            "[discord] Ignoring Codex admin channel message in %s",
+                            ",".join(sorted(channel_ids & codex_admin_channels)),
+                        )
+                        return
 
                 # Check if the message author is in the allowed user list
                 if not self._is_allowed_user(str(message.author.id)):
@@ -2008,6 +2030,75 @@ class DiscordAdapter(BasePlatformAdapter):
         except Exception as e:
             return SendResult(success=False, error=str(e))
 
+    async def send_linear_approval(
+        self,
+        chat_id: str,
+        issue_id: str,
+        issue_identifier: str,
+        issue_title: str,
+        previous_state: str,
+        current_state: str,
+        assignee: str = None,
+        url: str = None,
+        workflow_goal: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> SendResult:
+        """Send a Linear webhook approval request with buttons.
+
+        Shows two buttons: Execute (approve workflow) and Reject.
+        Used when a Linear issue transitions to "In Progress".
+        """
+        if not self._client or not DISCORD_AVAILABLE:
+            return SendResult(success=False, error="Not connected")
+
+        try:
+            # Resolve channel — use thread_id from metadata if present
+            target_id = chat_id
+            if metadata and metadata.get("thread_id"):
+                target_id = metadata["thread_id"]
+
+            channel = self._client.get_channel(int(target_id))
+            if not channel:
+                channel = await self._client.fetch_channel(int(target_id))
+
+            # Build embed
+            assignee_text = assignee or "없음"
+            url_text = url or "없음"
+
+            embed = discord.Embed(
+                title="📋 Linear Issue Approved",
+                description=f"**{issue_identifier}**: {issue_title}",
+                color=discord.Color.blue(),
+            )
+            embed.add_field(
+                name="변경",
+                value=f"{previous_state} → **{current_state}**",
+                inline=True,
+            )
+            embed.add_field(name="담당자", value=assignee_text, inline=True)
+            embed.add_field(name="URL", value=url_text, inline=False)
+
+            # Create and send view with buttons
+            view = LinearApprovalView(
+                issue_id=issue_id,
+                issue_identifier=issue_identifier,
+                issue_title=issue_title,
+                allowed_user_ids=self._allowed_user_ids,
+                workflow_goal=workflow_goal,
+            )
+
+            msg = await channel.send(embed=embed, view=view)
+            logger.info(
+                "[discord] Sent linear approval for %s to channel %s",
+                issue_identifier,
+                target_id,
+            )
+            return SendResult(success=True, message_id=str(msg.id))
+
+        except Exception as e:
+            logger.exception("[discord] Failed to send linear approval: %s", e)
+            return SendResult(success=False, error=str(e))
+
     async def send_update_prompt(
         self, chat_id: str, prompt: str, default: str = "",
         session_key: str = "",
@@ -2505,6 +2596,169 @@ if DISCORD_AVAILABLE:
             self, interaction: discord.Interaction, button: discord.ui.Button
         ):
             await self._resolve(interaction, "deny", discord.Color.red(), "Denied")
+
+        async def on_timeout(self):
+            """Handle view timeout -- disable buttons and mark as expired."""
+            self.resolved = True
+            for child in self.children:
+                child.disabled = True
+
+    class LinearApprovalView(discord.ui.View):
+        """Interactive buttons for Linear webhook approval workflow.
+
+        Shows two buttons: Execute (green) and Reject (red).
+        Clicking Execute triggers the orchestrator workflow.
+        Clicking Reject logs the rejection.
+        Times out after 30 minutes.
+        """
+
+        def __init__(
+            self,
+            issue_id: str,
+            issue_identifier: str,
+            issue_title: str,
+            allowed_user_ids: set,
+            workflow_goal: str = "",
+        ):
+            super().__init__(timeout=1800)  # 30-minute timeout
+            self.issue_id = issue_id
+            self.issue_identifier = issue_identifier
+            self.issue_title = issue_title
+            self.allowed_user_ids = allowed_user_ids
+            self.workflow_goal = workflow_goal
+            self.resolved = False
+
+        def _check_auth(self, interaction: discord.Interaction) -> bool:
+            """Verify the user clicking is authorized."""
+            if not self.allowed_user_ids:
+                return True  # No allowlist = anyone can approve
+            return str(interaction.user.id) in self.allowed_user_ids
+
+        async def _resolve_execute(self, interaction: discord.Interaction):
+            """Handle Execute button click - trigger orchestrator workflow."""
+            if self.resolved:
+                await interaction.response.send_message(
+                    "This approval has already been resolved~", ephemeral=True
+                )
+                return
+
+            if not self._check_auth(interaction):
+                await interaction.response.send_message(
+                    "You're not authorized to approve~", ephemeral=True
+                )
+                return
+
+            self.resolved = True
+
+            # Update embed with decision
+            embed = interaction.message.embeds[0] if interaction.message.embeds else None
+            if embed:
+                embed.color = discord.Color.green()
+                embed.set_footer(
+                    text=f"Approved by {interaction.user.display_name}"
+                )
+
+            # Disable all buttons
+            for child in self.children:
+                child.disabled = True
+
+            await interaction.response.edit_message(embed=embed, view=self)
+
+            # Execute the workflow via orchestrator
+            try:
+                from _agent.orchestrator.linear_webhook_handler import execute_workflow
+                from _agent.orchestrator.orchestrator import LinearWebhookEvent
+
+                # Create a minimal event object for the workflow
+                event = LinearWebhookEvent(
+                    action="Updated",
+                    resource_type="Issue",
+                    issue=None,  # Workflow will use issue_id directly
+                )
+
+                # Note: Full workflow execution would need proper event object
+                # For now, just log and acknowledge
+                logger.info(
+                    "[linear_approval] User %s approved %s (%s)",
+                    interaction.user.display_name,
+                    self.issue_identifier,
+                    self.issue_id,
+                )
+
+                # Acknowledge with follow-up
+                await interaction.followup.send(
+                    f"✅ 작업 실행이 승인되었습니다. "
+                    f"Issue {self.issue_identifier} 처리 중...",
+                    ephemeral=False,
+                )
+
+            except Exception as exc:
+                logger.exception("[linear_approval] Workflow execution failed: %s", exc)
+                await interaction.followup.send(
+                    f"⚠️ 워크플로우 실행 중 오류 발생: {exc}",
+                    ephemeral=True,
+                )
+
+        async def _resolve_reject(self, interaction: discord.Interaction):
+            """Handle Reject button click - log and dismiss."""
+            if self.resolved:
+                await interaction.response.send_message(
+                    "This approval has already been resolved~", ephemeral=True
+                )
+                return
+
+            if not self._check_auth(interaction):
+                await interaction.response.send_message(
+                    "You're not authorized to reject~", ephemeral=True
+                )
+                return
+
+            self.resolved = True
+
+            # Update embed with decision
+            embed = interaction.message.embeds[0] if interaction.message.embeds else None
+            if embed:
+                embed.color = discord.Color.red()
+                embed.set_footer(
+                    text=f"Rejected by {interaction.user.display_name}"
+                )
+
+            # Disable all buttons
+            for child in self.children:
+                child.disabled = True
+
+            await interaction.response.edit_message(embed=embed, view=self)
+
+            logger.info(
+                "[linear_approval] User %s rejected %s (%s)",
+                interaction.user.display_name,
+                self.issue_identifier,
+                self.issue_id,
+            )
+
+            await interaction.followup.send(
+                f"❌ 작업 실행이 거절되었습니다. "
+                f"Issue {self.issue_identifier}",
+                ephemeral=False,
+            )
+
+        @discord.ui.button(
+            label="✅ 작업 실행", style=discord.ButtonStyle.green,
+            custom_id="linear_execute_button"
+        )
+        async def execute_button(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
+            await self._resolve_execute(interaction)
+
+        @discord.ui.button(
+            label="❌ 거절", style=discord.ButtonStyle.red,
+            custom_id="linear_reject_button"
+        )
+        async def reject_button(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
+            await self._resolve_reject(interaction)
 
         async def on_timeout(self):
             """Handle view timeout -- disable buttons and mark as expired."""

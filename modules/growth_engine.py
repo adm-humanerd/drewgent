@@ -1,7 +1,7 @@
 """
-===============================================================================
+================================================================================
 Drewgent Growth Engine - Self-Evolution Core
-===============================================================================
+================================================================================
 Location: modules/growth_engine.py
 Purpose: Pattern detection, analysis, and knowledge base updates
 
@@ -9,7 +9,7 @@ Safety Constraints:
     - NO self-modifying code
     - NO direct deployment
     - All knowledge updates recorded, some require Drew approval
-===============================================================================
+================================================================================
 """
 
 import json
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 import uuid
 
-from logging_v2 import (
+from .logging_v2 import (
     get_log_db_connection,
     get_recent_errors,
     get_task_stats,
@@ -37,16 +37,41 @@ from logging_v2 import (
 # CONFIGURATION
 # =============================================================================
 
-MEMORY_BASE = Path("/Volumes/drewgent_storage/_agent/MEMORY")
-INSIGHTS_DIR = MEMORY_BASE / "insights"
-CONCEPTS_DIR = MEMORY_BASE / "concepts"
-PATTERNS_DIR = MEMORY_BASE / "LEARNED_PATTERNS"
+# Use drewgent_constants for profile-safe path resolution
+try:
+    from drewgent_constants import get_drewgent_home
+    _DREW_HOME = get_drewgent_home()
+except ImportError:
+    # Fallback for environments where drewgent_constants is not available
+    import os
+    _DREW_HOME = Path(os.environ.get("HERMES_HOME", Path.home() / ".drewgent"))
+
+# NeuronFS P4-cortex paths for growth engine data
+P4_CORTEX_BASE = _DREW_HOME / "P4-cortex"
+INSIGHTS_DIR = P4_CORTEX_BASE / "insights"
+CONCEPTS_DIR = _DREW_HOME / "P2-hippocampus" / "memories" / "concepts"
+PATTERNS_DIR = P4_CORTEX_BASE / "growth" / "patterns"
 
 # Pattern detection thresholds
 THRESHOLD_ERROR_REPETITION = 3  # Same error 3 times
 THRESHOLD_TOOL_FAILURE_RATE = 0.3  # 30% failure rate
 THRESHOLD_PERFORMANCE_DROP = 1.5  # 50% slower than average
 THRESHOLD_REPETITIVE_TASK = 5  # Same task type 5 times
+
+
+# =============================================================================
+# PATH SETUP
+# =============================================================================
+
+def _ensure_growth_dirs():
+    """Ensure growth engine directories exist."""
+    for directory in [P4_CORTEX_BASE, INSIGHTS_DIR, CONCEPTS_DIR, PATTERNS_DIR]:
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+# Create directories on module import
+_ensure_growth_dirs()
+
 
 # =============================================================================
 # GROWTH ENGINE

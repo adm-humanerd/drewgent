@@ -328,18 +328,43 @@ def show_status(args):
         
     elif sys.platform == 'darwin':
         from drewgent_cli.gateway import get_launchd_label
-        try:
-            result = subprocess.run(
-                ["launchctl", "list", get_launchd_label()],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            is_loaded = result.returncode == 0
-        except subprocess.TimeoutExpired:
-            is_loaded = False
+
+        is_loaded = False
+        checked_labels = []
+        matched_label = None
+
+        for label in [get_launchd_label(), "ai.drewgent.gateway"]:
+            if not label or label in checked_labels:
+                continue
+            checked_labels.append(label)
+            try:
+                result = subprocess.run(
+                    ["launchctl", "list", label],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    is_loaded = True
+                    matched_label = label
+                    break
+            except subprocess.TimeoutExpired:
+                continue
+
         print(f"  Status:       {check_mark(is_loaded)} {'loaded' if is_loaded else 'not loaded'}")
+        print(f"  Label:        {matched_label or (checked_labels[0] if checked_labels else 'unknown')}")
         print("  Manager:      launchd")
+
+        if is_loaded:
+            import urllib.request
+            import urllib.error
+            try:
+                req = urllib.request.urlopen("http://localhost:8642/health", timeout=3)
+                code = req.getcode()
+                api_ok = code == 200
+            except Exception:
+                api_ok = False
+            print(f"  API Health:  {check_mark(api_ok)} {'ok' if api_ok else 'unreachable'}")
     else:
         print(f"  Status:       {color('N/A', Colors.DIM)}")
         print("  Manager:      (not supported on this platform)")

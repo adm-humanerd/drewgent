@@ -8,6 +8,7 @@ import os
 import sys
 import subprocess
 import shutil
+from pathlib import Path
 
 from drewgent_cli.config import get_project_root, get_drewgent_home, get_env_path
 from drewgent_constants import display_drewgent_home
@@ -97,6 +98,148 @@ def check_fail(text: str, detail: str = ""):
 
 def check_info(text: str):
     print(f"    {color('→', Colors.CYAN)} {text}")
+
+
+def check_runtime_home_stubs(home: Path, display_home: str | None = None) -> list[str]:
+    """Detect stub modules in runtime home (source boundary debt)."""
+    display_home = display_home or _DHH
+    issues = []
+    markers = ("stub", "canonical version lives")
+    checked = ("drewgent_state.py", "drewgent_constants.py")
+    for name in checked:
+        f = home / name
+        if f.exists():
+            try:
+                content = f.read_text(encoding="utf-8", errors="ignore").lower()
+                if any(m in content for m in markers):
+                    issues.append(f"{name} in {display_home} is a stub; canonical version lives in source")
+            except Exception:
+                pass
+    cli_dir = home / "drewgent_cli"
+    if cli_dir.is_dir():
+        for f in cli_dir.iterdir():
+            if f.suffix == ".py" and f.is_file():
+                try:
+                    content = f.read_text(encoding="utf-8", errors="ignore").lower()
+                    if any(m in content for m in markers):
+                        issues.append(f"drewgent_cli/{f.name} in {display_home} is a stub")
+                except Exception:
+                    pass
+    return issues
+
+
+def _runtime_stub_paths(home: Path) -> list[Path]:
+    markers = ("stub", "canonical version lives")
+    paths: list[Path] = []
+    for name in ("drewgent_state.py", "drewgent_constants.py"):
+        candidate = home / name
+        if candidate.exists():
+            try:
+                content = candidate.read_text(encoding="utf-8", errors="ignore").lower()
+            except Exception:
+                continue
+            if any(marker in content for marker in markers):
+                paths.append(candidate)
+
+    cli_dir = home / "drewgent_cli"
+    if cli_dir.is_dir():
+        for candidate in cli_dir.iterdir():
+            if not candidate.is_file() or candidate.suffix != ".py":
+                continue
+            try:
+                content = candidate.read_text(encoding="utf-8", errors="ignore").lower()
+            except Exception:
+                continue
+            if any(marker in content for marker in markers):
+                paths.append(candidate)
+    return paths
+
+
+def archive_runtime_home_stubs(home: Path, display_home: str | None = None) -> int:
+    """Move runtime stub modules into P6 archive, preserving relative paths."""
+    display_home = display_home or _DHH
+    archive_root = home / "P6-prefrontal" / "archive" / "runtime-stubs"
+    moved = 0
+    for source in _runtime_stub_paths(home):
+        relative = source.relative_to(home)
+        target = archive_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        suffix = 1
+        final_target = target
+        while final_target.exists():
+            final_target = target.with_name(f"{target.name}.{suffix}")
+            suffix += 1
+        source.rename(final_target)
+        check_ok(f"Archived runtime stub {display_home}/{relative}")
+        moved += 1
+    return moved
+
+
+def check_deprecated_drewgent_db(home: Path, display_home: str | None = None) -> list[str]:
+    """Warn when empty drewgent.db exists; session state is stored in state.db."""
+    display_home = display_home or _DHH
+    db = home / "drewgent.db"
+    if db.exists() and db.stat().st_size == 0:
+        return [f"Empty legacy {display_home}/drewgent.db; session state lives in state.db"]
+    return []
+
+
+def check_empty_legacy_dirs(home: Path, display_home: str | None = None) -> list[str]:
+    """Warn on empty legacy agent/ and modules/ directories (source boundary debt)."""
+    display_home = display_home or _DHH
+    issues = []
+    for d in ("agent", "modules"):
+        path = home / d
+        if path.is_dir() and not any(path.iterdir()):
+            issues.append(f"Empty legacy {display_home}/{d}/ directory")
+    return issues
+
+
+def _check_runtime_architecture_debt(home: Path, display_home: str, issues: list[str]) -> None:
+    """Report runtime/source boundary debt that doctor cannot safely auto-fix."""
+    for issue in check_deprecated_drewgent_db(home, display_home):
+        check_warn(issue)
+        issues.append(issue)
+
+    for issue in check_runtime_home_stubs(home, display_home):
+        check_warn(issue)
+        issues.append(issue)
+
+    for issue in check_empty_legacy_dirs(home, display_home):
+        check_warn(issue)
+        issues.append(issue)
+
+
+def fix_runtime_architecture_debt(home: Path, display_home: str | None = None) -> int:
+    """Apply safe runtime architecture cleanups.
+
+    This only touches empty legacy artifacts. Stub modules and non-empty legacy
+    directories require manual migration because they may still contain user data
+    or locally customized compatibility code.
+    """
+    display_home = display_home or _DHH
+    fixed = 0
+    fixed += archive_runtime_home_stubs(home, display_home)
+
+    db = home / "drewgent.db"
+    if db.exists() and db.stat().st_size == 0:
+        archive = home / "drewgent.db.deprecated"
+        suffix = 1
+        while archive.exists():
+            archive = home / f"drewgent.db.deprecated.{suffix}"
+            suffix += 1
+        db.rename(archive)
+        check_ok(f"Archived empty legacy {display_home}/drewgent.db", f"({archive.name})")
+        fixed += 1
+
+    for dirname in ("agent", "modules"):
+        path = home / dirname
+        if path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+            check_ok(f"Removed empty legacy {display_home}/{dirname}/")
+            fixed += 1
+
+    return fixed
 
 
 def _check_gateway_service_linger(issues: list[str]) -> None:
@@ -483,6 +626,10 @@ def run_doctor(args):
                 check_info(f"WAL file is {wal_size // (1024*1024)} MB (normal for active sessions)")
         except Exception:
             pass
+
+    if should_fix:
+        fixed_count += fix_runtime_architecture_debt(drewgent_home, _DHH)
+    _check_runtime_architecture_debt(drewgent_home, _DHH, issues)
 
     _check_gateway_service_linger(issues)
     
