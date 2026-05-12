@@ -125,6 +125,14 @@ TOOLSETS = {
         ],
         "includes": []
     },
+
+    "research": {
+        "description": "Deep code exploration and research tools: semantic search (Semble) for finding code by intent, web search for external knowledge",
+        "tools": [
+            "semble_search", "semble_find_related",
+        ],
+        "includes": ["web"]
+    },
     
     "cronjob": {
         "description": "Cronjob management tool - create, list, update, pause, resume, remove, and trigger scheduled tasks",
