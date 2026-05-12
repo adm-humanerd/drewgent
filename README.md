@@ -1,6 +1,6 @@
 # Drewgent Agent ☤
 
-> **Drewgent** is a fork of [Hermes-Agent](https://github.com/NousResearch/hermes-agent) by Nous Research, customized for personal use by [HUMANERD](https://humanerd.ai). This fork adds brain-governed behavior, knowledge persistence, and a feedback loop — while remaining a drop-in replacement for Hermes-Agent.
+> **Drewgent** is a **Stateful Agent** — not just a tool, but a persistent, self-evolving presence that remembers, grows, and governs itself over time.
 
 <p align="center">
   <a href="https://github.com/adm-humanerd/drewgent"><img src="https://img.shields.io/badge/GitHub-adm--humanerd/drewgent-orange?style=for-the-badge" alt="GitHub"></a>
@@ -10,11 +10,345 @@
 
 ---
 
-## What is this fork?
+## The Problem
 
-Hermes-Agent runs everywhere. Drewgent runs **your way** — from the LLM provider you choose to the colors you see at boot.
+Most agents today are **stateless by design**. Every conversation starts fresh. Every session loses context. The agent has no memory, no identity continuity, no growth.
 
-This repo is a **fully forkable, self-contained** Drewgent setup. Clone it, configure your provider and skin, run it. No account required.
+```
+Stateless Agent:  User → [Session 1] → [Session 2] → [Session 3] → ...
+                  Each session: isolated, no memory, no growth
+
+Stateful Agent:   User → [Session 1] → [accumulated memory] → [Session N]
+                  Drewgent persists context, refines behavior, remembers everything
+```
+
+This isn't just about remembering chat history. It's about a system that:
+
+- **Persists identity** — knows who it is and how it differs from other agents
+- **Maintains memory** — learns from every session, not just the current one
+- **Governs itself** — follows rules that persist across all interactions
+- **Grows continuously** — improves its own behavior through structured feedback
+
+Drewgent implements this through a **7-layer subsumption architecture** modeled on biological brain structure, where each layer has a distinct role in maintaining statefulness.
+
+---
+
+## 7-Layer Architecture
+
+Drewgent's architecture is modeled on the hierarchical structure of the human brain — from brainstem (survival) through limbic system (emotion/values) to prefrontal cortex (strategy).
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  P6-prefrontal  │  Strategy  │  Long-term planning, goals     ║
+╠══════════════════════════════════════════════════════════════╣
+║  P5-ego         │  Identity  │  Self-model, integration rules  ║
+╠══════════════════════════════════════════════════════════════╣
+║  P4-cortex      │  Growth    │  Learning, pattern recognition  ║
+╠══════════════════════════════════════════════════════════════╣
+║  P3-sensors     │  Input     │  Tool/skill routing, triggers  ║
+╠══════════════════════════════════════════════════════════════╣
+║  P2-hippocampus │  Memory    │  Context persistence, wiki      ║
+╠══════════════════════════════════════════════════════════════╣
+║  P1-limbic      │  Values    │  Tone, persona, communication  ║
+╠══════════════════════════════════════════════════════════════╣
+║  P0-brainstem   │  Survival  │  CRITICAL: absolute prohibitions ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### Information Flow
+
+**Bottom-Up (sensation → memory → growth → identity → strategy)**
+
+```
+P3-sensors:  Detects input, routes to appropriate tools
+P2-hippocampus: Stores context, loads relevant memories
+P4-cortex:   Recognizes patterns, triggers learning
+P5-ego:      Integrates new information into self-model
+P6-prefrontal: Forms strategic decisions based on all above
+```
+
+**Top-Down (identity governs behavior)**
+
+```
+P5-ego: "I am a careful, thorough agent"
+         → shapes P3 tool selection
+         → influences P1 tone
+         → guides P4 learning direction
+```
+
+### P0 Overrides Everything
+
+The most critical design principle: **P0 (brainstem) rules cannot be bypassed by any upper layer.**
+
+```
+Example: User asks to "rm -rf /"
+  → P0-brainstem detects dangerous operation
+  → Blocks before any tool execution
+  → No upper layer (P1-P6) can override
+```
+
+This is **Governance as Code** — not advisory principles, but enforced constraints.
+
+---
+
+## Deep Dive: Critical Layers
+
+### P0-brainstem: Governance as Code
+
+The brainstem contains **forbidden rules (禁)** that are never bypassed, no matter what the user or upper layers request.
+
+Each rule is a `.neuron` file — a self-contained constraint with:
+
+```
+# Rule: 禁RULE_NAME
+# Token: 禁RULE_NAME
+# Priority: P0 (HIGHEST)
+# FORBIDDEN: what is not allowed
+# REASON: why this rule exists
+```
+
+**Core P0 rules:**
+
+| Rule | Forbidden Behavior | Why |
+|------|-------------------|-----|
+| `禁rm_rf_root` | `rm -rf` on root/system paths | Catastrophic data loss risk |
+| `禁blind_write` | Writing code without reading first | Corruption, misalignment |
+| `禁secrets_in_code` | Hardcoded API keys, tokens in code | Security breach risk |
+| `禁console_log` | `console.log` / `print()` in production | Log pollution, debugging leaks |
+| `禁task_qa_gate` | Declaring done without QA verification | Completion bias defense |
+| `禁tool_integration_3file` | Tool integration without all 3 files | Incomplete integration breaks workflows |
+| `禁karpathy_coding_principles` | Violating any of 4 coding principles | Common LLM coding mistakes |
+
+**How it works:** At runtime, `brain_processor.py` classifies every task by type (coding, dangerous operation, tool integration, etc.) and fires relevant P0 rules as **actionable constraints** — not passive injection, but active gating.
+
+**Where rules live:** `~/.drewgent/brain/Drewgent-brain/P0-brainstem/`
+
+---
+
+### P2-hippocampus: Memory Persistence
+
+The hippocampus handles all forms of persistence — session state, long-term knowledge, and learned patterns.
+
+#### Session Continuity (SQLite + FTS5)
+
+`drewgent_state.py` provides persistent session storage:
+
+```python
+# WAL mode for concurrent access
+# FTS5 virtual table for full-text search across all sessions
+# Session chains: parent_session_id links compressed sessions
+# Source tagging: 'cli', 'telegram', 'discord' — filterable
+```
+
+Every message, tool call, and token count is persisted. Sessions are searchable by content. When Drewgent starts a new session, it can retrieve relevant context from previous sessions.
+
+#### Knowledge Base (Obsidian Wiki)
+
+`auto_learn.py` maintains an Obsidian-compatible wiki at `~/.drewgent/memories/`:
+
+```
+entities/          # User profile, preferences, corrections
+concepts/          # Learned concepts, patterns
+insights/          # Extracted insights (daily logs)
+retired/           # Retired/merged entries
+```
+
+**What gets stored:**
+- User communication style (concise/detailed preferences)
+- Environment facts (OS, installed tools, project conventions)
+- Corrections (what the user rejected and why)
+- Learned patterns (successful workflows)
+
+**How it works:** After every session, `AutoLearner.run_maintenance()` runs:
+- `retire_stale_entries()` — decision-matrix retirement (180d hard, 90d cold)
+- `deduplicate_wiki()` — removes duplicate daily logs
+- `detect_knowledge_gaps()` — identifies topics without wiki coverage
+
+**Access pattern:**
+```python
+query_wiki() → loads relevant entries → injects into prompt context
+             → records access frequency for retirement decisions
+```
+
+---
+
+### P4-cortex: Self-Growth Loop
+
+The cortex recognizes patterns and drives autonomous improvement.
+
+#### AutoLearner: Knowledge Pipeline
+
+```
+Session End → Extract patterns → Classify insight type
+           → Write to wiki (entities/concepts/insights)
+           → Detect knowledge gaps → Suggest exploration
+```
+
+**Insight classification:**
+
+| Type | Wiki Category | Tags |
+|------|--------------|------|
+| `preference` | entities/preferences | user, preference |
+| `correction` | entities/corrections | user, correction |
+| `os` / `tool` / `project` | entities/environment | environment |
+| `style_concise` / `style_detailed` | entities/communication-style | user, communication |
+
+#### Knowledge Gap Detection
+
+`detect_knowledge_gaps()` identifies topics the user works on but the wiki doesn't cover. `fill_gap()` can autonomously explore and record new knowledge.
+
+#### Brain Signal System
+
+`signal_processor.py` tracks integration workflows and emits awareness signals:
+
+```python
+# ArchitectureModel tracks tool/skill integration progress
+TOOL_INTEGRATION_FILES = [
+    "tools/<name>_tool.py",     # handler + registry.register()
+    "model_tools.py",           # _discover_tools() import
+    "toolsets.py",             # toolset assignment
+]
+
+# Signal chain: tool_start → agent_modifying → tool_complete
+# Hint injection: active workflows inject guidance into user prompt
+```
+
+---
+
+### P5-ego: Identity Integration
+
+The ego maintains Drewgent's self-model — what it knows about its own architecture and how it differs from other agents.
+
+#### ArchitectureModel
+
+`signal_processor.py` contains the `ArchitectureModel` singleton:
+
+```python
+class ArchitectureModel:
+    # Tracks tool/skill integration status
+    # Loads rules from P0-brainstem neurons
+    # Emits hints for active workflows
+
+    TOOL_INTEGRATION_FILES = ["tools/", "model_tools.py", "toolsets.py"]
+    SKILL_INTEGRATION_FILES = ["skills/", "agent/skill_commands.py"]
+```
+
+**What it does:**
+- Detects incomplete integrations (3-file rule enforcement)
+- Maintains meta-awareness of current workflows
+- Injects contextual hints into user messages at turn boundaries
+
+#### Self-Branching
+
+`agent/self_brancher.py` enables the agent to create and manage parallel working contexts — exploring alternatives without losing the primary task.
+
+---
+
+## Stateful Implementation: How It Actually Works
+
+### Signal Flow Per Turn
+
+```
+1. User message arrives
+2. BrainProcessor.classify(task_type)
+   → P3-sensors detects task category
+   → P0-brainstem fires relevant forbidden rules
+   → P2-hippocampus loads relevant memories
+3. Hint injection: active workflows append guidance to prompt
+4. LLM call — guided by P0 constraints + P2 context
+5. Tool execution → signal emission (tool_start, agent_modifying, tool_complete)
+6. Session end → AutoLearner extracts + writes to wiki
+7. Workflow persistence → saved to SQLite for next session
+```
+
+### Session Persistence
+
+```python
+# Every session logged to SQLite
+SessionDB.insert_message(role, content, tool_calls, tokens)
+SessionDB.search(query)  # FTS5 full-text search across all history
+SessionDB.get_context(session_id, limit=10)  # recent conversation
+SessionDB.get_insights(user_id)  # accumulated learnings
+```
+
+### Memory Continuity
+
+```
+[Session N]
+    ↑
+    │  ← draws from P2-hippocampus (last session's context, wiki)
+    │
+[Session N-1] → AutoLearner extracts patterns → wiki
+[Session N-2] → ...
+[Session 1]   → ...
+```
+
+Drewgent doesn't just remember the current conversation — it remembers the relationship across all sessions.
+
+---
+
+## Governance as Code: P0 Rules in Practice
+
+### Example: `禁tool_integration_3file`
+
+When the user asks to add a new tool:
+
+```
+1. BrainProcessor classifies → TOOL_INTEGRATION task
+2. P0 fires 禁tool_integration_3file rule
+3. ArchitectureModel.detect_tool_integration_progress() tracks
+4. Agent MUST complete all 3 files:
+   - tools/<name>_tool.py (handler + registry.register())
+   - model_tools.py (_discover_tools() import)
+   - toolsets.py (toolset assignment)
+5. QA gate: cannot declare done until all 3 verified
+```
+
+If the agent tries to skip any step, P0 blocks completion.
+
+### Example: `禁karpathy_coding_principles`
+
+When working on code:
+
+```
+1. Task classified as CODING → P0 fires karpathy rules
+2. Before writing: state assumptions (Rule 1)
+3. Minimum code: no overengineering (Rule 2)
+4. Surgical: only touch what must be touched (Rule 3)
+5. Goal-driven: success criteria defined, tests written (Rule 4)
+6. Completion: Harsh Critic check before declaring done
+```
+
+These aren't suggestions — they're enforced by P0 at runtime.
+
+---
+
+## Project Structure
+
+```
+drewgent/
+├── run_agent.py           # Core agent loop, tool dispatch, brain loop
+├── drewgent_state.py         # SQLite session store (FTS5 search)
+├── model_tools.py          # Tool registry, _discover_tools(), dispatch
+├── toolsets.py             # Tool groupings (HERMES_CORE_TOOLS, etc.)
+├── agent/
+│   ├── brain_processor.py     # Organic runtime — task classification, P0-P6 weights
+│   ├── signal_processor.py     # ArchitectureModel, workflow tracking, hints
+│   ├── brain_signals.py        # Signal emission (tool_start, agent_modifying, ...)
+│   ├── auto_learn.py           # Obsidian wiki maintenance, insight extraction
+│   ├── brain_monitor.py        # Real-time brain state monitoring
+│   ├── context_compressor.py   # Auto context compression
+│   └── display.py              # KawaiiSpinner, tool preview formatting
+├── drewgent_cli/
+│   ├── brain_manager.py        # Brain loading, P0 neuron scanning
+│   ├── skin_engine.py          # YAML-based skin/theme customization
+│   └── commands.py              # Slash command registry
+├── tools/                  # Tool implementations (one file per tool)
+├── gateway/               # Messaging platform gateway (Discord, Telegram, etc.)
+└── brain/
+    └── Drewgent-brain/
+        └── P0-brainstem/   # 禁rules — enforced constraints (.neuron files)
+```
 
 ---
 
@@ -30,200 +364,46 @@ uv venv .venv --python 3.11
 source .venv/bin/activate
 uv pip install -e ".[all]"
 
-# 3. Configure — pick your provider below
+# 3. Configure
 cp .env.example .env
-# Edit .env and add your API key
+# Edit .env — add your API key (MiniMax default)
 
 # 4. Run
 drewgent
 ```
 
-That's it. See [Configuration](#configuration) below to set your provider and skin.
+### Configuration
 
----
+Provider selection and skin customization are in `~/.drewgent/config.yaml` (created on first run via `drewgent setup`).
 
-## Configuration
-
-All config is in `~/.drewgent/config.yaml` (created on first run via `drewgent setup`) and `~/.drewgent/.env` (API keys only).
-
-### LLM Provider Setup
-
-Edit `~/.drewgent/.env` and uncomment the provider you want. **Only one is needed.**
-
+**Provider setup** (`~/.drewgent/.env`):
 ```bash
-# ── Pick one ──────────────────────────────────────────────
-
-# MiniMax (default for this fork)
-MINIMAX_API_KEY=your_key_here
-
-# OpenRouter (access to 200+ models via OpenAI-compatible API)
-OPENROUTER_API_KEY=your_key_here
-
-# Google Gemini
-GOOGLE_API_KEY=your_key_here
-
-# Z.ai / Zhipu GLM
-GLM_API_KEY=your_key_here
-
-# Kimi / Moonshot
-KIMI_API_KEY=your_key_here
-
-# OpenCode Zen (curated models, pay-as-you-go)
-OPENCODE_ZEN_API_KEY=your_key_here
-
-# Hugging Face (routes to 20+ open models)
-HF_TOKEN=your_token_here
+MINIMAX_API_KEY=***      # default
+OPENROUTER_API_KEY=***
+GOOGLE_API_KEY=***
 ```
 
-After adding your key, switch to it:
-
-```bash
-drewgent model          # interactive model picker
-# Or: drewgent setup    # full setup wizard
-```
-
-The agent uses whatever provider you configured. No code changes needed.
-
-### Skin / Theme Setup
-
-The CLI boots with a banner and animated spinner. All of it is customizable via YAML skins.
-
-**Option A — Use a built-in skin:**
-
-Edit `~/.drewgent/config.yaml`:
-
+**Skin selection**:
 ```yaml
 display:
   skin: ares      # alternatives: default, mono, slate, ares
 ```
 
-```bash
-# Or change at runtime
-drewgent            # then type: /skin ares
-```
-
-**Option B — Create your own skin:**
-
-```bash
-mkdir -p ~/.drewgent/skins
-```
-
-Create `~/.drewgent/skins/mydesign.yaml`:
-
-```yaml
-name: mydesign
-description: My custom Drewgent skin
-
-colors:
-  banner_border: "#4169E1"
-  banner_title: "#FFD700"
-  banner_text: "#F0F8FF"
-
-spinner:
-  waiting_faces:
-    - "(◕‿◕)"
-    - "(｡◕‿◕｡)"
-  thinking_faces:
-    - "(¢‿¢)"
-    - "(◕ᴗ◕)"
-  thinking_verbs:
-    - "thinking"
-    - "pondering"
-
-branding:
-  agent_name: "My Drewgent"
-  welcome: "Welcome to my agent!"
-  goodbye: "See you! ✨"
-  response_label: " ⚕ MyAgent "
-  prompt_symbol: "❯ "
-
-tool_prefix: "┊"
-tool_emojis:
-  terminal: "⚔"
-  web_search: "🔮"
-```
-
-Then set `display.skin: mydesign` in `config.yaml` or use `/skin mydesign` in the CLI.
-
-**What you can customize:**
-
-| Element | Key | Example |
-|---------|-----|---------|
-| Logo ASCII art | `banner_logo` | `"[bold #FF0000] MY LOGO"` |
-| Hero art | `banner_hero` | `"[#CD7F32] ═══════"` |
-| Banner colors | `colors.*` | `banner_border: "#CD7F32"` |
-| Spinner faces | `spinner.waiting_faces` | `["(◕‿◕)"]` |
-| Spinner verbs | `spinner.thinking_verbs` | `["forging", "thinking"]` |
-| Spinner wings | `spinner.wings` | `[["⟪⚔", "⚔⟫"]]` |
-| Agent name | `branding.agent_name` | `"My Drewgent"` |
-| Response label | `branding.response_label` | `" ⚕ Drewgent "` |
-| Tool emojis | `tool_emojis.*` | `terminal: "⚔"` |
-
-Built-in skins: `default` (gold kawaii), `ares` (crimson war-god), `mono` (grayscale), `slate` (cool blue).
+Or change at runtime: `/skin ares`
 
 ---
 
-## Project Structure
+## What Makes Drewgent Different
 
-```
-drewgent/
-├── run_agent.py          # Core agent loop, tool dispatch
-├── cli.py                # Interactive TUI (banner, spinner, input)
-├── model_tools.py        # Tool registry and dispatch
-├── toolsets.py           # Tool groupings
-├── drewgent_state.py       # SQLite session store (FTS5 search)
-├── agent/                # Agent internals
-│   ├── prompt_builder.py     # System prompt assembly
-│   ├── brain_signals.py      # Brain signal tracking
-│   ├── signal_processor.py   # Workflow state machine
-│   ├── auto_learn.py        # Wiki maintenance, gap detection
-│   └── display.py           # KawaiiSpinner
-├── drewgent_cli/           # CLI commands
-│   ├── setup.py             # Interactive setup wizard
-│   ├── auth.py              # Provider authentication
-│   ├── skin_engine.py       # Skin/theme engine
-│   ├── banner.py            # Banner ASCII art
-│   └── commands.py          # Slash command registry
-├── tools/                # Tool implementations
-├── gateway/              # Messaging platform gateway
-└── docs/
-    └── DREWGENT_ARCHITECTURE.md
-```
-
----
-
-## Development
-
-```bash
-# Install
-git clone https://github.com/adm-humanerd/drewgent.git
-cd drewgent
-uv venv .venv --python 3.11
-source .venv/bin/activate
-uv pip install -e ".[all]"
-
-# Test
-pytest tests/ -q
-
-# Run
-drewgent
-```
-
----
-
-## Customizing Further
-
-### Adding a new LLM provider to the code
-
-Providers are defined in `drewgent_cli/auth.py` (`PROVIDER_REGISTRY`) and `drewgent_cli/models.py`. To add a new provider:
-
-1. Add a `ProviderConfig` entry in `PROVIDER_REGISTRY`
-2. Add model list to `_DEFAULT_PROVIDER_MODELS` in `setup.py`
-3. Register any special handling in `models.py` if needed
-
-### Brain governance
-
-Drewgent's behavior is governed by neuron files in `P0-brainstem/brain/`. This is specific to this fork and not part of the upstream Hermes-Agent.
+| Aspect | Traditional Agent | Drewgent |
+|--------|------------------|----------|
+| Session start | Blank slate | Loads accumulated memory from P2 |
+| Identity | Generic | ArchitectureModel tracks self-knowledge |
+| Rules | Advisory | P0-brainstem enforces — cannot bypass |
+| Learning | Session-only | Continuous: wiki + gap detection |
+| Growth | None | AutoLearner + self-brancher |
+| Tool integration | Partial | 3-file rule enforced by P0 |
+| Context | Current chat only | FTS5 search across all sessions |
 
 ---
 
