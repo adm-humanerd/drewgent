@@ -181,6 +181,37 @@ Make sure all services use `network_mode: host` for localhost access.
 
 ## Documentation
 
+## Trend Harvester (P4-cortex Growth Pipeline)
+
+Autonomous AI trend collection — runs every 12h, no Claude/GPT-4 dependency required.
+
+**Pipeline:**
+```
+collect (GitHub trending, 7 languages) -> score (5-axis philosophy) -> analyzed/ -> P2 sync
+```
+
+**5-Axis Philosophy Filter:**
+
+| Axis | Weight | Pass | Hard Block |
+|------|--------|------|------------|
+| practical | 1.0 | >=0.6 | No |
+| integratable | 1.0 | >=0.5 | No |
+| drewgent_first | 1.0 | >=0.5 | No |
+| no_model_dependency | 1.5 | >=0.7 | **YES** |
+| safety | 1.0 | >=0.6 | No |
+
+**Hard Block Rule:** Trends requiring Claude/GPT-4 class models are REJECTED.
+
+**Run manually:**
+```bash
+python3 scripts/trend_harvester.py
+python3 scripts/harvester_memory_sync.py  # sync to P2-hippocampus
+```
+
+Scripts: `scripts/trend_harvester.py`, `scripts/harvester_memory_sync.py`
+Config: `P4-cortex/growth/trend-harvester/philosophy_axes.json`
+
+
 - [Architecture Guide](./docs/DREWGENT_ARCHITECTURE.md) - Full architecture, module connections, optimization decisions
 - [Knowledge Bus](./docs/PDCA_KNOWLEDGE_BUS.md) - How the feedback loop works
 - [Development Guide](./AGENTS.md) - For contributors
