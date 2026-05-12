@@ -1,6 +1,7 @@
 """Tests for drewgent_cli configuration management."""
 
 import os
+import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -43,6 +44,26 @@ class TestEnsureDrewgentHome:
             assert (tmp_path / "sessions").is_dir()
             assert (tmp_path / "logs").is_dir()
             assert (tmp_path / "memories").is_dir()
+
+    def test_creates_p5_p6_runtime_ontology(self, tmp_path):
+        with patch.dict(os.environ, {"DREW_HOME": str(tmp_path)}):
+            ensure_drewgent_home()
+
+            profile_state = tmp_path / "P5-ego" / "config" / "profile_state.json"
+            assert profile_state.exists()
+            assert json.loads(profile_state.read_text())["layer"] == "P5-ego"
+            for name in ("plans", "incidents", "migrations", "recovery-journal"):
+                assert (tmp_path / "P6-prefrontal" / name).is_dir()
+
+    def test_does_not_overwrite_existing_p5_profile_state(self, tmp_path):
+        with patch.dict(os.environ, {"DREW_HOME": str(tmp_path)}):
+            profile_state = tmp_path / "P5-ego" / "config" / "profile_state.json"
+            profile_state.parent.mkdir(parents=True)
+            profile_state.write_text('{"custom": true}', encoding="utf-8")
+
+            ensure_drewgent_home()
+
+            assert json.loads(profile_state.read_text()) == {"custom": True}
 
     def test_creates_default_soul_md_if_missing(self, tmp_path):
         with patch.dict(os.environ, {"DREW_HOME": str(tmp_path)}):

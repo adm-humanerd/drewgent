@@ -15,6 +15,23 @@
 
 set -e
 
+# Guard against environment leakage when the installer is launched from another
+# Python-driven tool session (e.g. Hermes terminal tool). A pre-set PYTHONPATH
+# can force pip/entrypoints to import a different checkout than the one being
+# installed, which makes fresh installs appear broken or stale.
+if [ -n "${PYTHONPATH:-}" ]; then
+    echo "⚠ Ignoring inherited PYTHONPATH during install to avoid module shadowing"
+    unset PYTHONPATH
+fi
+if [ -n "${PYTHONHOME:-}" ]; then
+    echo "⚠ Ignoring inherited PYTHONHOME during install"
+    unset PYTHONHOME
+fi
+
+# Prevent uv from discovering config files (uv.toml, pyproject.toml) from the
+# wrong user's home directory when running under sudo -u <user>.  See #21269.
+export UV_NO_CONFIG=1
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'

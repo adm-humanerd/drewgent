@@ -628,6 +628,17 @@ def load_gateway_config() -> GatewayConfig:
                     if isinstance(frc, list):
                         frc = ",".join(str(v) for v in frc)
                     os.environ["DISCORD_FREE_RESPONSE_CHANNELS"] = str(frc)
+                codex_admin_channels = discord_cfg.get("codex_admin_channels")
+                if codex_admin_channels is not None and not os.getenv(
+                    "DISCORD_CODEX_ADMIN_CHANNELS"
+                ):
+                    if isinstance(codex_admin_channels, list):
+                        codex_admin_channels = ",".join(
+                            str(v) for v in codex_admin_channels
+                        )
+                    os.environ["DISCORD_CODEX_ADMIN_CHANNELS"] = str(
+                        codex_admin_channels
+                    )
                 if "auto_thread" in discord_cfg and not os.getenv(
                     "DISCORD_AUTO_THREAD"
                 ):

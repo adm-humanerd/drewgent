@@ -112,6 +112,9 @@ from agent.prompt_builder import (
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     OPENAI_MODEL_EXECUTION_GUIDANCE,
 )
+from agent.brain_signals import get_signal_emitter
+from agent.signal_processor import get_signal_processor
+from agent.awareness_reporter import get_awareness_reporter
 from agent.usage_pricing import estimate_usage_cost, normalize_usage
 from agent.display import (
     KawaiiSpinner,
@@ -126,6 +129,47 @@ from agent.trajectory import (
     save_trajectory as _save_trajectory_to_file,
 )
 from utils import atomic_json_write, env_var_enabled
+
+
+def _build_self_model_hint() -> str:
+    """Build P5-Ego self-model hint for the system prompt.
+
+    This gives the agent awareness of its own integration architecture,
+    so it knows how to add tools and skills without being told from scratch.
+    """
+    try:
+        from drewgent_cli.config import get_drewgent_home
+
+        Drew_HOME = get_drewgent_home()
+
+        # Read P5-Ego self-model
+        ego_path = Drew_HOME / "P5-ego" / "SELF_MODEL.md"
+        # Read P4-Cortex integration protocol
+        protocol_path = Drew_HOME / "P4-cortex" / "growth" / "INTEGRATION_PROTOCOL.md"
+
+        parts = []
+        if ego_path.exists():
+            content = ego_path.read_text(encoding="utf-8").strip()
+            if content:
+                # Truncate to avoid inflating system prompt too much
+                lines = content.split("\n")
+                truncated = "\n".join(lines[:60])
+                if len(lines) > 60:
+                    truncated += f"\n\n[... P5-Ego SELF_MODEL truncated: {len(lines)-60} more lines. Use file tools to read full file.]"
+                parts.append(f"# P5-Ego Self-Model (Drewgent Self-Awareness)\n\n{truncated}")
+
+        if protocol_path.exists():
+            content = protocol_path.read_text(encoding="utf-8").strip()
+            if content:
+                lines = content.split("\n")
+                truncated = "\n".join(lines[:40])
+                if len(lines) > 40:
+                    truncated += f"\n\n[... INTEGRATION_PROTOCOL truncated: {len(lines)-40} more lines. Use file tools to read.]"
+                parts.append(f"# Integration Protocol (Tool/Skill Absorption Procedure)\n\n{truncated}")
+
+        return "\n\n".join(parts) if parts else ""
+    except Exception:
+        return ""
 
 
 class _SafeWriter:
@@ -357,6 +401,103 @@ def _paths_overlap(left: Path, right: Path) -> bool:
     common_len = min(len(left_parts), len(right_parts))
     return left_parts[:common_len] == right_parts[:common_len]
 
+
+# ── Brain signal: file-path extraction from tool results ──────────────────────
+# Maps tool name → JSON key that carries the affected file path in the result.
+_FILE_PATH_KEYS = {
+    "write_file": "path",
+    "patch": "path",
+    "terminal": None,  # Terminal requires special handling via command parsing
+}
+_FILE_PATH_PATTERNS = [
+    r'"path"\s*:\s*"([^"]+)"',
+    r"'path'\s*:\s*'([^']+)'",
+    r"File path[:\s]+([^\n]+)",
+    r"Wrote to ([^\n]+)",
+    r"Created directory[s]?\s+(.+)",
+    r"bytes_written.*?([^\n]+)",
+]
+
+# Terminal command patterns for file path extraction
+_TERMINAL_FILE_PATTERNS = [
+    # Redirection: echo "..." >> path
+    re.compile(r">>\s*([^\s>]+)"),
+    # Redirect with space: cat > path
+    re.compile(r">\s+([^\s]+)"),
+    # Path-based commands: patch path/to/file, write path/to/file
+    re.compile(r"(?:patch|write_file|edit|copy|move)\s+([^\s]+)"),
+    # mkdir/create path
+    re.compile(r"(?:mkdir|touch|mkdir\s+-p)\s+([^\s]+)"),
+    # sed/perl path replacement
+    re.compile(r"(?:sed|perl).*?\s+-i(?:_\w+)?\s+['\"]([^\'\"]+)['\"]"),
+]
+
+
+def _extract_file_path_from_tool_args(tool_name: str, args: dict) -> Optional[str]:
+    """Extract file path from tool arguments for known file-modifying tools."""
+    key = _FILE_PATH_KEYS.get(tool_name)
+    if key is None:
+        return None
+    path = args.get(key) if isinstance(args, dict) else None
+    if isinstance(path, str) and path.strip():
+        return path.strip()
+    return None
+
+
+def _extract_file_path_from_result(result: str, tool_name: str) -> Optional[str]:
+    """Extract file path from tool result JSON or terminal output.
+
+    Used by brain signals to track which files are being modified during
+    an integration workflow.
+    """
+    if not isinstance(result, str):
+        return None
+
+    # Terminal tool: parse file paths from command output
+    if tool_name == "terminal":
+        for pattern in _TERMINAL_FILE_PATTERNS:
+            m = pattern.search(result)
+            if m:
+                candidate = m.group(1).strip()
+                if _looks_like_path(candidate):
+                    return candidate
+        return None
+
+    # Fast path: try to parse as JSON and look for 'path' key
+    try:
+        parsed = json.loads(result)
+        if isinstance(parsed, dict):
+            # Direct path field
+            path = parsed.get("path")
+            if isinstance(path, str) and path.strip():
+                return path.strip()
+            # dirs_created might contain the created directory path
+            if tool_name == "write_file":
+                dirs = parsed.get("dirs_created")
+                if isinstance(dirs, list) and dirs:
+                    return dirs[0]
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Slow path: regex search for common file-path patterns in the result text
+    for pattern in _FILE_PATH_PATTERNS:
+        m = re.search(pattern, result, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            if _looks_like_path(candidate):
+                return candidate
+
+    return None
+
+
+def _looks_like_path(s: str) -> bool:
+    """Heuristic: does this string look like a file path?"""
+    if not s:
+        return False
+    return any(c in s for c in "/\\") or s.startswith(("~", ".", "/"))
+
+
+# ── Budget warning pattern ──────────────────────────────────────────────────────
 
 _SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
 
@@ -1104,6 +1245,15 @@ class AIAgent:
                     e,
                 )
 
+        # Brain signal: restore workflows from session DB on agent startup
+        # This ensures workflows persist across agent restarts.
+        if self._session_db and self.session_id:
+            try:
+                _sp = get_signal_processor()
+                _sp.restore_workflows(self._session_db, self.session_id)
+            except Exception:
+                pass
+
         # In-memory todo list for task planning (one per agent/session)
         from tools.todo_tool import TodoStore
 
@@ -1120,6 +1270,7 @@ class AIAgent:
         # Persistent memory (MEMORY.md + USER.md) -- loaded from disk
         self._memory_store = None
         self._auto_learner = None  # Auto-learning instance
+        self._brain_signal_initialized = False  # Brain signal system initialized
         self._memory_enabled = False
         self._user_profile_enabled = False
         self._memory_nudge_interval = 10
@@ -1160,7 +1311,13 @@ class AIAgent:
                         _auto_learn_path = mem_config.get("auto_learn_wiki_path")
                         if not _auto_learn_path:
                             _auto_learn_path = _drewgent_home / "memories"
-                        _wiki_path = Path(str(_auto_learn_path))
+                        # Expand ~ to home directory
+                        _wiki_path = Path(os.path.expanduser(str(_auto_learn_path)))
+
+                        # Wiki context settings for bidirectional sync
+                        self._wiki_context_enabled = mem_config.get("wiki_context_enabled", True)
+                        self._wiki_context_max_entries = int(mem_config.get("wiki_context_max_entries", 10))
+                        self._wiki_context_max_chars = int(mem_config.get("wiki_context_max_chars", 4000))
 
                         self._auto_learner = AutoLearner(
                             wiki_path=_wiki_path,
@@ -1174,6 +1331,41 @@ class AIAgent:
                             )
             except Exception:
                 pass  # Memory is optional -- don't break agent init
+
+# Brain signal system: initialize signal processor + awareness reporter
+        # This gives the agent self-awareness about tool/skill integration workflows.
+        if not self._brain_signal_initialized:
+            try:
+                _sp = get_signal_processor()
+                _ar = get_awareness_reporter()
+
+                # Emit agent.initialized event so awareness reporter knows tool count
+                from agent.event_bus import get_event_bus
+                _bus = get_event_bus()
+                _tool_count = len(self.valid_tool_names) if self.valid_tool_names else 0
+                _bus.emit(
+                    "brain.awareness.initialized",
+                    payload={
+                        "tool_count": _tool_count,
+                        "tools": list(self.valid_tool_names)[:20] if self.valid_tool_names else [],
+                        "session_id": session_id,
+                    },
+                    source="run_agent",
+                    correlation_id=session_id,
+                )
+            except Exception:
+                pass  # Brain signals are best-effort
+
+        # Brain signal monitor: subscribe to all brain events and deliver to status channel
+        # This tracks the complete data-flow through the brain pipeline in real-time.
+        if not getattr(self, "_brain_monitor_started", False):
+            try:
+                from agent.brain_monitor import get_monitor
+                _mon = get_monitor(session_id, delivery_target="discord:1493982427708915713", buffer_size=20, flush_interval=15.0)
+                _mon.start()
+                self._brain_monitor_started = True
+            except Exception:
+                pass  # Monitor is best-effort, never blocks agent operation
 
         # Memory provider plugin (external — one at a time, alongside built-in)
         # Reads memory.provider from config to select which plugin to activate.
@@ -1683,6 +1875,86 @@ class AIAgent:
             "api.anthropic.com" in self._base_url_lower
             or self._base_url_lower.rstrip("/").endswith("/anthropic")
         )
+
+        if is_native_anthropic:
+            return True, True
+        if is_openrouter and is_claude:
+            return True, False
+        if is_anthropic_wire and is_claude:
+            # Third-party Anthropic-compatible gateway.
+            return True, True
+
+        # MiniMax on its Anthropic-compatible endpoint serves its own
+        # model family (MiniMax-M2.7, M2.5, M2.1, M2) with documented
+        # cache_control support (0.1× read pricing, 5-minute TTL).  The
+        # blanket is_claude gate above excludes these — opt them in
+        # explicitly via provider id or host match so users on
+        # provider=minimax / minimax-cn (or custom endpoints pointing at
+        # api.minimax.io/anthropic / api.minimaxi.com/anthropic) get the
+        # same cost reduction as Claude traffic.
+        # Docs: https://platform.minimax.io/docs/api-reference/anthropic-api-compatible-cache
+        if is_anthropic_wire:
+            is_minimax_provider = provider_lower in {"minimax", "minimax-cn"}
+            is_minimax_host = (
+                base_url_host_matches(eff_base_url, "api.minimax.io")
+                or base_url_host_matches(eff_base_url, "api.minimaxi.com")
+            )
+            if is_minimax_provider or is_minimax_host:
+                return True, True
+
+        # Qwen/Alibaba on OpenCode (Zen/Go) and native DashScope: OpenAI-wire
+        # transport that accepts Anthropic-style cache_control markers and
+        # rewards them with real cache hits.  Without this branch
+        # qwen3.6-plus on opencode-go reports 0% cached tokens and burns
+        # through the subscription on every turn.
+        model_is_qwen = "qwen" in model_lower
+        provider_is_alibaba_family = provider_lower in {
+            "opencode", "opencode-zen", "opencode-go", "alibaba",
+        }
+        if provider_is_alibaba_family and model_is_qwen:
+            # Envelope layout (native_anthropic=False): markers on inner
+            # content parts, not top-level tool messages.  Matches
+            # pi-mono's "alibaba" cacheControlFormat.
+            return True, False
+
+        return False, False
+
+    @staticmethod
+    def _model_requires_responses_api(model: str) -> bool:
+        """Return True for models that require the Responses API path.
+
+        GPT-5.x models are rejected on /v1/chat/completions by both
+        OpenAI and OpenRouter (error: ``unsupported_api_for_model``).
+        Detect these so the correct api_mode is set regardless of
+        which provider is serving the model.
+        """
+        m = model.lower()
+        # Strip vendor prefix (e.g. "openai/gpt-5.4" → "gpt-5.4")
+        if "/" in m:
+            m = m.rsplit("/", 1)[-1]
+        return m.startswith("gpt-5")
+
+    @staticmethod
+    def _provider_model_requires_responses_api(
+        model: str,
+        *,
+        provider: Optional[str] = None,
+    ) -> bool:
+        """Return True when this provider/model pair should use Responses API."""
+        normalized_provider = (provider or "").strip().lower()
+        # Nous serves GPT-5.x models via its OpenAI-compatible chat
+        # completions endpoint; its /v1/responses endpoint returns 404.
+        if normalized_provider == "nous":
+            return False
+        if normalized_provider == "copilot":
+            try:
+                from hermes_cli.models import _should_use_copilot_responses_api
+                return _should_use_copilot_responses_api(model)
+            except Exception:
+                # Fall back to the generic GPT-5 rule if Copilot-specific
+                # logic is unavailable for any reason.
+                pass
+        return AIAgent._model_requires_responses_api(model)
 
     def _max_tokens_param(self, value: int) -> dict:
         """Return the correct max tokens kwarg for the current provider.
@@ -2893,6 +3165,17 @@ class AIAgent:
         manager. NOT called per-turn — only at CLI exit, /reset, gateway
         session expiry, etc.
         """
+        # Deep reflection: session-end auto-learning via AutoLearner
+        if self._auto_learner and messages:
+            try:
+                self._auto_learner.on_session_end(messages)
+            except Exception:
+                pass
+            try:
+                self._auto_learner.run_maintenance()
+            except Exception:
+                pass
+
         if self._memory_manager:
             try:
                 self._memory_manager.on_session_end(messages or [])
@@ -2900,6 +3183,25 @@ class AIAgent:
                 pass
             try:
                 self._memory_manager.shutdown_all()
+            except Exception:
+                pass
+
+        # Brain signal: persist active workflows at session end
+        try:
+            _sp = get_signal_processor()
+            if self.session_id:
+                # session_db is the SessionDB instance; persist workflows to it
+                if hasattr(self, "_session_db") and self._session_db:
+                    _sp.persist_active_workflows(self._session_db, self.session_id)
+        except Exception:
+            pass
+
+        # Brain signal monitor: stop and flush at session end
+        if getattr(self, "_brain_monitor_started", False):
+            try:
+                from agent.brain_monitor import stop_monitor
+                stop_monitor(self.session_id)
+                self._brain_monitor_started = False
             except Exception:
                 pass
 
@@ -3069,6 +3371,21 @@ class AIAgent:
             except Exception:
                 pass
 
+        # Wiki knowledge base context (Obsidian bidirectional sync)
+        # Reads recent entries from entities/, concepts/, insights/ for context
+        if self._auto_learner and self._auto_learner.is_enabled:
+            try:
+                _wiki_context_enabled = getattr(self, "_wiki_context_enabled", True)
+                if _wiki_context_enabled:
+                    _wiki_context = self._auto_learner.read_wiki_for_context(
+                        max_entries=getattr(self, "_wiki_context_max_entries", 10),
+                        max_chars=getattr(self, "_wiki_context_max_chars", 4000),
+                    )
+                    if _wiki_context:
+                        prompt_parts.append(_wiki_context)
+            except Exception:
+                pass
+
         has_skills_tools = any(
             name in self.valid_tool_names
             for name in ["skills_list", "skill_view", "skill_manage"]
@@ -3091,6 +3408,12 @@ class AIAgent:
         if skills_prompt:
             prompt_parts.append(skills_prompt)
 
+        # P5-Ego Self-Model — 에이전트가 자기 구조를 인식하는 힌트
+        # ~P5-ego/SELF_MODEL.md + ~P4-cortex/growth/INTEGRATION_PROTOCOL.md
+        self_model_hint = _build_self_model_hint()
+        if self_model_hint:
+            prompt_parts.append(self_model_hint)
+
         if not self.skip_context_files:
             # Use TERMINAL_CWD for context file discovery when set (gateway
             # mode).  The gateway process runs from the drewgent-agent install
@@ -3102,6 +3425,13 @@ class AIAgent:
             )
             if context_files_prompt:
                 prompt_parts.append(context_files_prompt)
+
+        # Project context: load from ~/.drewgent/projects/<name>/.brain/ if set
+        if not self.skip_context_files:
+            from agent.project_context import build_project_context_prompt
+            project_context = build_project_context_prompt()
+            if project_context:
+                prompt_parts.append(project_context)
 
         from drewgent_time import now as _drewgent_now
 
@@ -6926,6 +7256,15 @@ class AIAgent:
                 except Exception as cb_err:
                     logging.debug(f"Tool start callback error: {cb_err}")
 
+        # Brain signal: emit tool_start for integration workflow tracking
+        # Only for file-modifying tools that indicate integration intent
+        for tc, name, args in parsed_calls:
+            try:
+                emitter = get_signal_emitter()
+                emitter.tool_start(name, args)
+            except Exception:
+                pass  # Brain signals are best-effort
+
         # ── Concurrent execution ─────────────────────────────────────────
         # Each slot holds (function_name, function_args, function_result, duration, error_flag)
         results = [None] * num_tools
@@ -7076,6 +7415,24 @@ class AIAgent:
                     self.tool_complete_callback(tc.id, name, args, function_result)
                 except Exception as cb_err:
                     logging.debug(f"Tool complete callback error: {cb_err}")
+
+            # Brain signal: emit tool_complete + agent_modifying for integration tracking
+            try:
+                emitter = get_signal_emitter()
+                # tool_complete signature: (tool_name, result, success=True)
+                _success = not ("error" in function_result.lower() and "success" not in function_result.lower())
+                emitter.tool_complete(name, function_result, _success)
+                # Check for file-modifying results and emit agent_modifying
+                _file_path = _extract_file_path_from_result(function_result, name)
+                if _file_path:
+                    # agent_modifying signature: (operation, path, details="")
+                    emitter.agent_modifying(
+                        f"tool:{name}",
+                        _file_path,
+                        f"tool:{name} completed, file modified",
+                    )
+            except Exception:
+                pass  # Brain signals are best-effort
 
             # Save oversized results to file instead of destructive truncation
             function_result = _save_oversized_tool_result(name, function_result)
@@ -7594,6 +7951,23 @@ class AIAgent:
                 )
                 print(f"{self.log_prefix}{tier}: {remaining} iterations remaining")
 
+        # ── Integration workflow hint injection ───────────────────
+        # After all tool calls, check for active integration workflows
+        # and inject the next-step hint into the last tool result.
+        # This gives the agent real-time guidance during tool/skill integration.
+        integration_hint = self._get_integration_hint()
+        if integration_hint and messages and messages[-1].get("role") == "tool":
+            last_content = messages[-1]["content"]
+            try:
+                parsed = json.loads(last_content)
+                if isinstance(parsed, dict):
+                    parsed["_integration_hint"] = integration_hint
+                    messages[-1]["content"] = json.dumps(parsed, ensure_ascii=False)
+                else:
+                    messages[-1]["content"] = last_content + f"\n\n{integration_hint}"
+            except (json.JSONDecodeError, TypeError):
+                messages[-1]["content"] = last_content + f"\n\n{integration_hint}"
+
     def _get_budget_warning(self, api_call_count: int) -> Optional[str]:
         """Return a budget pressure string, or None if not yet needed.
 
@@ -7617,6 +7991,43 @@ class AIAgent:
                 f"{remaining} iterations left. Start consolidating your work.]"
             )
         return None
+
+    def _get_integration_hint(self) -> Optional[str]:
+        """Return integration workflow hint if active workflows exist.
+
+        Checks signal_processor for active tool/skill integration workflows
+        and returns the next-step hint from ArchitectureModel.
+        """
+        try:
+            from agent.signal_processor import get_signal_processor
+            sp = get_signal_processor()
+            if sp is None:
+                return None
+
+            active_workflows = sp.get_active_workflows()
+            if not active_workflows:
+                return None
+
+            arch = sp.get_architecture_model()
+            if arch is None:
+                return None
+
+            for wf in active_workflows:
+                if wf.completed:
+                    continue
+                if wf.integration_type == "tool":
+                    progress = arch.detect_tool_integration_progress(wf.files_modified)
+                    hint = progress.get("next_hint")
+                    if hint:
+                        return f"[INTEGRATION HINT: {wf.target_name} — {hint}]"
+                elif wf.integration_type == "skill":
+                    progress = arch.detect_skill_integration_progress(wf.files_modified)
+                    hint = progress.get("next_hint")
+                    if hint:
+                        return f"[INTEGRATION HINT: skill/{wf.target_name} — {hint}]"
+            return None
+        except Exception:
+            return None
 
     def _emit_context_pressure(self, compaction_progress: float, compressor) -> None:
         """Notify the user that context is approaching the compaction threshold.
@@ -7998,7 +8409,9 @@ class AIAgent:
             persist_user_message if persist_user_message is not None else user_message
         )
 
-        # Track memory nudge trigger (turn-based, checked here).
+        # Combine user message with injected contexts (brain context, plugin context, memory prefetch)
+        # Brain context (wiki knowledge base) is queried before the loop.
+        # Plugin context comes from pre_llm_call hooks.
         # Skill trigger is checked AFTER the agent loop completes, based on
         # how many tool iterations THIS turn used.
         _should_review_memory = False
@@ -8205,6 +8618,52 @@ class AIAgent:
             except Exception:
                 pass
 
+        # Brain context: query the agent's knowledge base for relevant information.
+        # Injected into the user message alongside memory prefetch cache.
+        # Uses original_user_message (clean input) to avoid bloating the query.
+        _brain_context = ""
+        if self._auto_learner and self._auto_learner.is_enabled:
+            try:
+                _brain_context = self._auto_learner.query_wiki(
+                    query=original_user_message if isinstance(original_user_message, str) else "",
+                    context="current conversation",
+                    max_results=3,
+                    max_chars=800,
+                ) or ""
+            except Exception:
+                pass
+
+        # Combine user message with injected contexts (brain context, plugin context, memory prefetch)
+        # Brain context (wiki knowledge base) is queried before the loop.
+        # Plugin context comes from pre_llm_call hooks.
+        # All injected context is ephemeral (not persisted to session DB).
+        _injected_parts = []
+        if _brain_context:
+            _injected_parts.append(f"[Brain context]\n{_brain_context}")
+        if _plugin_user_context:
+            _injected_parts.append(f"[Plugin context]\n{_plugin_user_context}")
+        if _ext_prefetch_cache:
+            _injected_parts.append(f"[Memory context]\n{_ext_prefetch_cache}")
+
+        # Brain signal: inject integration workflow hints into user message
+        # This is the "hint injection" mechanism - awareness_reporter generates hints
+        # that get passed to the model through the user message.
+        _integration_hint = ""
+        try:
+            _sp = get_signal_processor()
+            _workflows = _sp.get_active_workflows()
+            if _workflows:
+                _ar = get_awareness_reporter()
+                _integration_hint = _ar.get_last_hint() or ""
+        except Exception:
+            pass
+
+        if _integration_hint:
+            _injected_parts.append(f"[Integration workflow]\n{_integration_hint}")
+
+        if _injected_parts:
+            user_message = user_message + "\n\n" + "\n\n".join(_injected_parts)
+
         while (
             api_call_count < self.max_iterations and self.iteration_budget.remaining > 0
         ):
@@ -8291,6 +8750,10 @@ class AIAgent:
                             _injections.append(_fenced)
                     if _plugin_user_context:
                         _injections.append(_plugin_user_context)
+                    if _brain_context:
+                        _injections.append(
+                            f"<brain_context>\n{_brain_context}\n</brain_context>"
+                        )
                     if _injections:
                         _base = api_msg.get("content", "")
                         if isinstance(_base, str):
@@ -10428,6 +10891,31 @@ class AIAgent:
                     }
                     if _tc_names == {"execute_code"}:
                         self.iteration_budget.refund()
+
+                    # ── P4-Cortex: Record workflow pattern per turn ──────────
+                    # Track tool sequences for pattern detection and growth.
+                    # Skipped if auto_learner is disabled or sequence is empty.
+                    if _tc_names and self._auto_learner and self._auto_learner.is_enabled:
+                        # Classify task type based on tool composition
+                        _task_type = "unknown"
+                        if any(t in _tc_names for t in ("write_file", "patch")):
+                            _task_type = "code_edit"
+                        elif any(t in _tc_names for t in ("mcp_search_files", "read_file")):
+                            _task_type = "research"
+                        elif any(t in _tc_names for t in ("terminal", "mcp_terminal")):
+                            _task_type = "shell"
+                        elif any(t in _tc_names for t in ("mcp_browser_navigate", "browser_snapshot")):
+                            _task_type = "browser"
+                        try:
+                            self._auto_learner.record_workflow_pattern(
+                                tool_sequence=sorted(_tc_names),
+                                task_type=_task_type,
+                                turn_number=api_call_count,
+                                outcome="success",
+                                session_id=self.session_id or "",
+                            )
+                        except Exception:
+                            pass  # Non-critical: pattern recording should never break the loop
 
                     # Use real token counts from the API response to decide
                     # compression.  prompt_tokens + completion_tokens is the

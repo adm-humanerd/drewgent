@@ -252,6 +252,32 @@ TOOL_CATEGORIES = {
                     {"key": "FIRECRAWL_API_URL", "prompt": "Your Firecrawl instance URL (e.g., http://localhost:3002)"},
                 ],
             },
+            {
+                "name": "SearXNG",
+                "badge": "free · self-hosted · search only",
+                "tag": "Privacy-respecting metasearch engine — search only (pair with any extract provider)",
+                "web_backend": "searxng",
+                "env_vars": [
+                    {"key": "SEARXNG_URL", "prompt": "Your SearXNG instance URL (e.g., http://localhost:8080)", "url": "https://searxng.github.io/searxng/"},
+                ],
+            },
+            {
+                "name": "Brave Search (Free Tier)",
+                "badge": "free tier · search only",
+                "tag": "2,000 queries/mo free — search only (pair with any extract provider)",
+                "web_backend": "brave-free",
+                "env_vars": [
+                    {"key": "BRAVE_SEARCH_API_KEY", "prompt": "Brave Search subscription token", "url": "https://brave.com/search/api/"},
+                ],
+            },
+            {
+                "name": "DuckDuckGo (ddgs)",
+                "badge": "free · no key · search only",
+                "tag": "Search via the ddgs Python package — no API key (pair with any extract provider)",
+                "web_backend": "ddgs",
+                "env_vars": [],
+                "post_setup": "ddgs",
+            },
         ],
     },
     "image_gen": {
@@ -419,6 +445,118 @@ def _run_post_setup(post_setup_key: str):
         elif not shutil.which("npm"):
             _print_warning("    Node.js not found. Install Camofox via Docker:")
             _print_info("      docker run -p 9377:9377 -e CAMOFOX_PORT=9377 jo-inc/camofox-browser")
+
+    elif post_setup_key == "kittentts":
+        try:
+            __import__("kittentts")
+            _print_success("    kittentts is already installed")
+            return
+        except ImportError:
+            pass
+        import subprocess
+        _print_info("    Installing kittentts (~25-80MB model, CPU-only)...")
+        wheel_url = (
+            "https://github.com/KittenML/KittenTTS/releases/download/"
+            "0.8.1/kittentts-0.8.1-py3-none-any.whl"
+        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-U", wheel_url, "soundfile", "--quiet"],
+                capture_output=True, text=True, timeout=300,
+            )
+            if result.returncode == 0:
+                _print_success("    kittentts installed")
+                _print_info("    Voices: Jasper, Bella, Luna, Bruno, Rosie, Hugo, Kiki, Leo")
+                _print_info("    Models: KittenML/kitten-tts-nano-0.8-int8 (25MB), micro (41MB), mini (80MB)")
+            else:
+                _print_warning("    kittentts install failed:")
+                _print_info(f"      {result.stderr.strip()[:300]}")
+                _print_info(f"    Run manually: python -m pip install -U '{wheel_url}' soundfile")
+        except subprocess.TimeoutExpired:
+            _print_warning("    kittentts install timed out (>5min)")
+            _print_info(f"    Run manually: python -m pip install -U '{wheel_url}' soundfile")
+
+    elif post_setup_key == "piper":
+        try:
+            __import__("piper")
+            _print_success("    piper-tts is already installed")
+        except ImportError:
+            import subprocess
+            _print_info("    Installing piper-tts (~14MB wheel, voices downloaded on first use)...")
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-U", "piper-tts", "--quiet"],
+                    capture_output=True, text=True, timeout=300,
+                )
+                if result.returncode == 0:
+                    _print_success("    piper-tts installed")
+                else:
+                    _print_warning("    piper-tts install failed:")
+                    _print_info(f"      {result.stderr.strip()[:300]}")
+                    _print_info("    Run manually: python -m pip install -U piper-tts")
+                    return
+            except subprocess.TimeoutExpired:
+                _print_warning("    piper-tts install timed out (>5min)")
+                _print_info("    Run manually: python -m pip install -U piper-tts")
+                return
+        _print_info("    Default voice: en_US-lessac-medium (downloaded on first TTS call)")
+        _print_info("    Full voice list: https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/VOICES.md")
+        _print_info("    Switch voices by setting tts.piper.voice in ~/.hermes/config.yaml")
+
+    elif post_setup_key == "ddgs":
+        try:
+            __import__("ddgs")
+            _print_success("    ddgs is already installed")
+        except ImportError:
+            import subprocess
+            _print_info("    Installing ddgs (DuckDuckGo search package)...")
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-U", "ddgs", "--quiet"],
+                    capture_output=True, text=True, timeout=300,
+                )
+                if result.returncode == 0:
+                    _print_success("    ddgs installed")
+                else:
+                    _print_warning("    ddgs install failed:")
+                    _print_info(f"      {result.stderr.strip()[:300]}")
+                    _print_info("    Run manually: python -m pip install -U ddgs")
+                    return
+            except subprocess.TimeoutExpired:
+                _print_warning("    ddgs install timed out (>5min)")
+                _print_info("    Run manually: python -m pip install -U ddgs")
+                return
+        _print_info("    No API key required. DuckDuckGo enforces server-side rate limits.")
+        _print_info("    Pair with an extract provider if you also need web_extract.")
+
+    elif post_setup_key == "spotify":
+        # Run the full `hermes auth spotify` flow — if the user has no
+        # client_id yet, this drops them into the interactive wizard
+        # (opens the Spotify dashboard, prompts for client_id, persists
+        # to ~/.hermes/.env), then continues straight into PKCE. If they
+        # already have an app, it skips the wizard and just does OAuth.
+        from types import SimpleNamespace
+        try:
+            from hermes_cli.auth import login_spotify_command
+        except Exception as exc:
+            _print_warning(f"    Could not load Spotify auth: {exc}")
+            _print_info("    Run manually: hermes auth spotify")
+            return
+        _print_info("    Starting Spotify login...")
+        try:
+            login_spotify_command(SimpleNamespace(
+                client_id=None, redirect_uri=None, scope=None,
+                no_browser=False, timeout=None,
+            ))
+            _print_success("    Spotify authenticated")
+        except SystemExit as exc:
+            # User aborted the wizard, or OAuth failed — don't fail the
+            # toolset enable; they can retry with `hermes auth spotify`.
+            _print_warning(f"    Spotify login did not complete: {exc}")
+            _print_info("    Run later: hermes auth spotify")
+        except Exception as exc:
+            _print_warning(f"    Spotify login failed: {exc}")
+            _print_info("    Run manually: hermes auth spotify")
 
     elif post_setup_key == "rl_training":
         try:

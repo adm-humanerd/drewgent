@@ -286,16 +286,197 @@ registry.register(
 )
 ```
 
-Then add the import to `model_tools.py` in the `_modules` list:
+Then add the import to `model_tools.py` in the `_modules` list (line ~133):
 
 ```python
+# _modules is imported at module level — importing a tool file triggers
+# its registry.register() call, so the tool becomes available system-wide.
 _modules = [
     # ... existing modules ...
     "tools.my_tool",
 ]
 ```
 
+**How registration works**: `_discover_tools()` (called at the bottom of `model_tools.py`) imports all modules in `_modules`. Each tool file runs `registry.register(...)` at module level during import, which adds the tool to the central registry. The registry then exposes schemas to the LLM and dispatches calls to the handler.
+
+**`registry.register()` fields**:
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `str` | Tool name — must match `schema.function.name` |
+| `toolset` | `str` | Toolset this tool belongs to (e.g. `"terminal"`, `"file"`) |
+| `schema` | `dict` | OpenAI function-calling schema (name, description, parameters) |
+| `handler` | `callable` | Function that receives `(args, **kwargs)` and returns a string |
+| `check_fn` | `callable` | Optional — returns `True` if tool is available (env vars, API keys, etc.) |
+| `requires_env` | `list[str]` | Optional — env var names the tool needs |
+
 If it's a new toolset, add it to `toolsets.py` and to the relevant platform presets.
+
+---
+
+## Database Usage Guidelines
+
+Drewgent uses **SQLite** as its primary data store. Multiple components share this pattern — understanding the conventions below keeps the codebase consistent and avoids subtle concurrency bugs.
+
+### When to Use the SessionDB
+
+`SessionDB` (`drewgent_state.py`) is the **official interface** for all session-related data:
+
+```python
+from drewgent_state import SessionDB
+
+db = SessionDB()                     # Default: ~/.drewgent/state.db
+db = SessionDB(db_path=Path(...))    # Custom path (use only in tests)
+```
+
+**Do not** call `sqlite3.connect()` directly for session data. The `SessionDB` class handles:
+- WAL mode + concurrent readers / single writer
+- Application-level retry with random jitter (avoids SQLite's built-in convoy effect)
+- FTS5 full-text search via auto-synced triggers
+- Schema versioning and migrations
+
+### SessionDB Write Pattern
+
+Every write goes through `_execute_write()`:
+
+```python
+def _execute_write(self, fn: Callable[[sqlite3.Connection], T]) -> T:
+    for attempt in range(self._WRITE_MAX_RETRIES):
+        try:
+            with self._lock:
+                self._conn.execute("BEGIN IMMEDIATE")   # Lock at tx start
+                result = fn(self._conn)
+                self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            if "locked" in str(exc).lower():
+                time.sleep(random.uniform(0.020, 0.150))  # Jitter back-off
+                continue
+            raise
+    # WAL checkpoint every 50 writes
+    if self._write_count % 50 == 0:
+        self._try_wal_checkpoint()
+```
+
+Key settings:
+
+| Parameter | Value | Reason |
+|---|---|---|
+| `timeout` | 1 second | Short — we handle retries at app level |
+| `isolation_level` | `None` | We manage transactions explicitly |
+| `PRAGMA journal_mode` | `WAL` | Concurrent reads + single writer |
+| `PRAGMA foreign_keys` | `ON` | Enforce parent_session_id referential integrity |
+
+### Adding a New DB File
+
+If you need a **separate SQLite file** (not session data), follow this template:
+
+```python
+from pathlib import Path
+from drewgent_constants import get_drewgent_home
+import sqlite3, threading, random, time
+
+def open_my_db() -> sqlite3.Connection:
+    db_path = get_drewgent_home() / "my_feature.db"
+    conn = sqlite3.connect(str(db_path), timeout=10.0, isolation_level=None)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+class MyFeatureDB:
+    _WRITE_MAX_RETRIES = 15
+    _WRITE_RETRY_MIN_S = 0.020
+    _WRITE_RETRY_MAX_S = 0.150
+
+    def __init__(self):
+        self._conn = open_my_db()
+        self._lock = threading.Lock()
+
+    def _write(self, fn):
+        for attempt in range(self._WRITE_MAX_RETRIES):
+            try:
+                with self._lock:
+                    self._conn.execute("BEGIN IMMEDIATE")
+                    result = fn(self._conn)
+                    self._conn.commit()
+                    return result
+            except sqlite3.OperationalError as exc:
+                if "locked" in str(exc).lower() and attempt < self._WRITE_MAX_RETRIES - 1:
+                    time.sleep(random.uniform(self._WRITE_RETRY_MIN_S, self._WRITE_RETRY_MAX_S))
+                    continue
+                raise
+```
+
+### Path Management (Critical)
+
+**Never hardcode `~/.drewgent`** in code. Use:
+
+```python
+from drewgent_constants import get_drewgent_home, display_drewgent_home
+
+db_path = get_drewgent_home() / "state.db"      # For code paths
+# display_drewgent_home() for user-facing messages
+```
+
+`get_drewgent_home()` respects the `HERMES_HOME` environment variable (profile isolation).
+
+### FTS5 Full-Text Search
+
+If your feature needs text search, use FTS5 with triggers — **never sync manually**:
+
+```sql
+CREATE VIRTUAL TABLE IF NOT EXISTS my_fts USING fts5(content, content=my_table, content_rowid=id);
+
+CREATE TRIGGER IF NOT EXISTS my_fts_insert AFTER INSERT ON my_table BEGIN
+    INSERT INTO my_fts(rowid, content) VALUES (new.id, new.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS my_fts_delete AFTER DELETE ON my_table BEGIN
+    INSERT INTO my_fts(my_fts, rowid, content) VALUES('delete', old.id, old.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS my_fts_update AFTER UPDATE ON my_table BEGIN
+    INSERT INTO my_fts(my_fts, rowid, content) VALUES('delete', old.id, old.content);
+    INSERT INTO my_fts(rowid, content) VALUES (new.id, new.content);
+END;
+```
+
+### Schema Migrations
+
+Use the `schema_version` table pattern:
+
+```python
+def _init_schema(self):
+    cursor = self._conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
+    cursor.execute("SELECT version FROM schema_version LIMIT 1")
+    row = cursor.fetchone()
+    if row is None:
+        cursor.execute("INSERT INTO schema_version (version) VALUES (?)", (1,))
+    else:
+        current = row[0] if isinstance(row, sqlite3.Row) else row[0]
+        if current < 2:
+            self._migrate_v2(cursor)
+            cursor.execute("UPDATE schema_version SET version = 2")
+        if current < 3:
+            self._migrate_v3(cursor)
+            cursor.execute("UPDATE schema_version SET version = 3")
+
+def _migrate_v2(self, cursor):
+    try:
+        cursor.execute("ALTER TABLE my_table ADD COLUMN new_col TEXT")
+    except sqlite3.OperationalError:
+        pass  # Already exists
+```
+
+### Reference Implementations
+
+| Component | DB File | Key Patterns |
+|---|---|---|
+| `drewgent_state.py` — `SessionDB` | `state.db` | WAL + retry + checkpoint + FTS5 + migrations |
+| `modules/logging_v2.py` | `logging_v2.db` | WAL + `synchronous=NORMAL` + `cache_size=-64000` |
+| `plugins/memory/holographic/store.py` — `MemoryStore` | `memory_store.db` | WAL + `threading.RLock()` + migration |
+| `plugins/memory/retaindb/__init__.py` — `_WriteQueue` | `pending.db` | Thread-local connections + crash-safe pending row replay |
 
 ---
 

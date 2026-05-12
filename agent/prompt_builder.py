@@ -867,6 +867,9 @@ def load_soul_md() -> Optional[str]:
 
     soul_path = get_drewgent_home() / "SOUL.md"
     if not soul_path.exists():
+        # Fallback: P1-limbic persona directory (brain-referenced location)
+        soul_path = get_drewgent_home() / "P1-limbic" / "persona" / "SOUL.md"
+    if not soul_path.exists():
         return None
     try:
         content = soul_path.read_text(encoding="utf-8").strip()

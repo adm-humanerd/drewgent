@@ -355,7 +355,7 @@ def _run_single_child(
     # mutated the global. This is the correct parent toolset, not the child's.
     import model_tools
     _saved_tool_names = getattr(child, "_delegate_saved_tool_names",
-                                list(model_tools._last_resolved_tool_names))
+                                model_tools.get_last_resolved_tool_names())
 
     child_pool = getattr(child, '_credential_pool', None)
     leased_cred_id = None
@@ -491,7 +491,7 @@ def _run_single_child(
 
         saved_tool_names = getattr(child, "_delegate_saved_tool_names", None)
         if isinstance(saved_tool_names, list):
-            model_tools._last_resolved_tool_names = list(saved_tool_names)
+            model_tools.set_last_resolved_tool_names(saved_tool_names)
 
         # Remove child from active tracking
 
@@ -581,7 +581,7 @@ def delegate_task(
     # _build_child_agent() calls AIAgent() which calls get_tool_definitions(),
     # which overwrites model_tools._last_resolved_tool_names with child's toolset.
     import model_tools as _model_tools
-    _parent_tool_names = list(_model_tools._last_resolved_tool_names)
+    _parent_tool_names = _model_tools.get_last_resolved_tool_names()
 
     # Build all child agents on the main thread (thread-safe construction)
     # Wrapped in try/finally so the global is always restored even if a
@@ -604,7 +604,7 @@ def delegate_task(
             children.append((i, t, child))
     finally:
         # Authoritative restore: reset global to parent's tool names after all children built
-        _model_tools._last_resolved_tool_names = _parent_tool_names
+        _model_tools.set_last_resolved_tool_names(_parent_tool_names)
 
     if n_tasks == 1:
         # Single task -- run directly (no thread pool overhead)

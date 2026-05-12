@@ -15,6 +15,7 @@ Output is in Karpathy's LLM Wiki / Obsidian-compatible Markdown format:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -23,7 +24,7 @@ import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Set, List, Tuple, Optional
+from typing import Set, List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ WIKI_STRUCTURE = {
     "entities": "entities",
     "concepts": "concepts",
     "insights_log": "insights",
+    "retired": "retired",
 }
 
 
@@ -73,6 +75,13 @@ INSIGHT_TAGS = {
     "tool": ["environment", "tool"],
     "project": ["environment", "project"],
 }
+
+# =============================================================================
+# SESSION WORKFLOW PATTERNS (P4-Cortex integration)
+# =============================================================================
+
+# Path to where session workflow JSON files are stored
+_P4_CORTEX_PATTERNS_DIR = Path.home() / ".drewgent" / "P4-cortex" / "growth" / "patterns"
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +245,9 @@ class VectorStore:
                 embedding TEXT NOT NULL,
                 itype TEXT,
                 target TEXT,
-                created_at TEXT
+                created_at TEXT,
+                last_accessed TEXT DEFAULT '',
+                access_count INTEGER DEFAULT 0
             )
         """)
         conn.commit()
@@ -255,8 +266,8 @@ class VectorStore:
             conn = sqlite3.connect(str(self._db_path))
             conn.execute(
                 """
-                INSERT OR REPLACE INTO vectors (id, content, embedding, itype, target, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO vectors (id, content, embedding, itype, target, created_at, last_accessed, access_count)
+                VALUES (?, ?, ?, ?, ?, ?, '', 0)
             """,
                 (
                     id,
@@ -279,10 +290,9 @@ class VectorStore:
         try:
             conn = sqlite3.connect(str(self._db_path))
             cursor = conn.execute(
-                "SELECT id, content, embedding, itype, target FROM vectors"
+                "SELECT id, content, embedding, itype, target, access_count FROM vectors"
             )
             rows = cursor.fetchall()
-            conn.close()
 
             results = []
             for row in rows:
@@ -295,8 +305,14 @@ class VectorStore:
                         "score": score,
                         "itype": row[3],
                         "target": row[4],
+                        "access_count": row[5],
                     }
                 )
+
+            # Touch IDs for access tracking
+            for r in results:
+                if r.get("id"):
+                    self._vector_store.touch(r["id"]) if self._vector_store else None
 
             results.sort(key=lambda x: x["score"], reverse=True)
             return results[:limit]
@@ -316,6 +332,44 @@ class VectorStore:
         except Exception:
             return 0
 
+    def touch(self, id: str) -> None:
+        """Record that vector id was accessed (increment count, update timestamp)."""
+        try:
+            conn = sqlite3.connect(str(self._db_path))
+            conn.execute(
+                """
+                UPDATE vectors
+                SET last_accessed = ?, access_count = access_count + 1
+                WHERE id = ?
+                """,
+                (datetime.now().isoformat(), id),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    def get_access_stats(self) -> dict:
+        """Return overall access statistics."""
+        try:
+            conn = sqlite3.connect(str(self._db_path))
+            cursor = conn.execute(
+                """
+                SELECT COUNT(*), SUM(access_count), MAX(last_accessed)
+                FROM vectors
+                WHERE last_accessed != ''
+                """
+            )
+            row = cursor.fetchone()
+            conn.close()
+            return {
+                "total_accessed": row[0] or 0,
+                "total_access_count": row[1] or 0,
+                "last_accessed": row[2] or "",
+            }
+        except Exception:
+            return {"total_accessed": 0, "total_access_count": 0, "last_accessed": ""}
+
 
 # ---------------------------------------------------------------------------
 # Insight Dataclass
@@ -331,6 +385,10 @@ class Insight:
     content: str
     context: str = ""
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    last_accessed: str = ""  # ISO timestamp of last query_wiki hit
+    access_count: int = 0  # how many times this entry was returned by query_wiki
+    lifetime_days: int = 90  # retire after this many days of no access (0=never)
+    retired: bool = False  # true = moved to retired/ folder
 
     def get_wiki_category(self) -> Tuple[str, str]:
         """Get (folder, filename) for wiki storage."""
@@ -340,6 +398,28 @@ class Insight:
     def get_tags(self) -> List[str]:
         """Get Obsidian tags for this insight."""
         return INSIGHT_TAGS.get(self.itype, ["insight", "general"])
+
+    def touch(self) -> None:
+        """Mark this entry as accessed right now."""
+        self.last_accessed = datetime.now().isoformat()
+        self.access_count += 1
+
+    def should_retire(self, now: datetime) -> bool:
+        """Check if this entry should be retired based on access patterns.
+
+        Retirement criteria:
+        - Never accessed and 180+ days old: hard retire
+        - Never accessed and 90+ days with no insights: cold retire
+        - Low engagement (120+ days with <=1 insight): low engagement retire
+        """
+        age_days = (now - datetime.fromisoformat(self.timestamp)).days
+        if age_days >= 180:
+            return True
+        if age_days >= 90 and self.access_count == 0:
+            return True
+        if age_days >= 120 and self.access_count <= 1:
+            return True
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +437,60 @@ _USER_PATTERNS = [
     (r"(?:I'm in|I'm working in)[:\s]+([^.!?]+)", "field"),
     (r"(?:my timezone is|I'm in timezone)[:\s]+([^.!?]+)", "timezone"),
 ]
+
+# Implicit preference patterns — learn from short/command inputs
+# These recognize user signals without explicit "I prefer X" phrasing
+_SENTIMENT_POSITIVE = frozenset({
+    "thanks", "nice", "great", "perfect", "ok", "okay",
+    "yep", "yeah", "yes", "good", "good job", "cool",
+})
+_SENTIMENT_NEGATIVE = frozenset({"no", "nah", "nope", "wait", "actually", "no,"})
+_SHORT_TOOL_COMMANDS = frozenset({
+    "grep", "find", "ls", "ps", "cat", "head", "tail",
+    "sed", "awk", "ssh", "scp", "rsync", "git", "docker", "python",
+    "curl", "wget", "tar", "zip", "unzip", "chmod", "chown",
+    "kill", "pkill", "pgrep", "top", "htop",
+})
+
+
+def _detect_implicit_style(text: str) -> tuple[str, str] | None:
+    """Detect implicit style preference from short user input.
+
+    Returns:
+        (itype, content) tuple if matched, None otherwise.
+    """
+    t = text.lower().strip().rstrip(",.!?")
+
+    # Single command word → command-style preference
+    if t in ("agent", "agi", "autonomous", "single"):
+        return "style_command", f"from short input: {text.strip()[:60]}"
+
+    # Positive sentiment → concise confirmation style
+    if t in _SENTIMENT_POSITIVE:
+        return "style_concise", f"from short input: {text.strip()[:60]}"
+
+    # Compound positive: "nice thanks" / "great job" / "ok sure" / "nice, thanks" etc.
+    words = t.split()
+    if len(words) == 2:
+        w0 = words[0].rstrip(",.!?")
+        w1 = words[1].rstrip(",.!?")
+        if w0 in _SENTIMENT_POSITIVE and w1 in _SENTIMENT_POSITIVE:
+            return "style_concise", f"from short input: {text.strip()[:60]}"
+
+    # Negative sentiment → cautious style
+    if t in _SENTIMENT_NEGATIVE:
+        return "style_cautious", f"from short input: {text.strip()[:60]}"
+
+    # Tool command prefix (grep, git, docker, etc.) → tool preference
+    first_word = t.split()[0] if t.split() else ""
+    if first_word in _SHORT_TOOL_COMMANDS:
+        return "tool", f"from short input: {text.strip()[:60]}"
+
+    # Long detailed input → prefer detailed responses
+    if len(text) >= 80:
+        return "style_detailed", f"from short input: {text.strip()[:60]}"
+
+    return None
 
 # Communication style patterns
 _STYLE_PATTERNS = [
@@ -700,10 +834,263 @@ Auto-generated table of contents for the knowledge base.
 
 
 # ---------------------------------------------------------------------------
+# Maintenance: stale retirement, deduplication, autonomous growth
+# --------------------------------------------------------------------------
+
+
+def _parse_frontmatter_date(content: str, key: str = "updated") -> Optional[str]:
+    """Extract a date from frontmatter, or None if not found."""
+    m = re.search(rf"^{key}: (\d{{4}}-\d{{2}}-\d{{2}})", content, re.MULTILINE)
+    return m.group(1) if m else None
+
+
+def _parse_daily_entry_date(line: str) -> Optional[str]:
+    """Extract YYYY-MM-DD from a daily log entry line like '- 2026-05-08: ...'."""
+    m = re.match(r"- (\d{4}-\d{2}-\d{2}):", line)
+    return m.group(1) if m else None
+
+
+def _normalize_content(text: str) -> str:
+    """Strip wiki formatting for dedup comparison."""
+    # Remove Obsidian block anchors ^foo-bar
+    text = re.sub(r"\s*\^[a-zA-Z0-9_-]+", "", text)
+    # Remove date prefix '- 2026-05-08:'
+    text = re.sub(r"- \d{4}-\d{2}-\d{2}:\s*", "", text)
+    # Remove tags #foo, #bar
+    text = re.sub(r"\s*(?:^|\s)#[a-zA-Z0-9_-]+", "", text)
+    # Remove context parentheticals
+    text = re.sub(r"\s*\*\(context: [^)]+\)\*", "", text)
+    # Collapse whitespace
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+class WikiMaintenance:
+    """Autonomous wiki maintenance operations."""
+
+    def __init__(self, wiki_path: Path):
+        self._wiki_path = wiki_path
+        self._retired_path = wiki_path / WIKI_STRUCTURE["retired"]
+        self._retired_path.mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # 1. retire_stale_entries
+    # ------------------------------------------------------------------
+
+    def retire_stale_entries(self, dry_run: bool = False) -> dict:
+        """Move entries to retired/ based on access frequency signals.
+
+        Retirement decision (in priority order):
+        1. Never updated in 180+ days: hard retire
+        2. No new insights in 90+ days AND 0 insight blocks: cold retire
+        3. 120+ days old with no activity: low engagement retire
+
+        Returns dict with counts of examined / retired / errors.
+        """
+        now = datetime.now()
+        examined = 0
+        retired = 0
+        errors = 0
+
+        for folder in ("entities", "concepts", "insights"):
+            folder_path = self._wiki_path / WIKI_STRUCTURE.get(folder, folder)
+            if not folder_path.exists():
+                continue
+
+            for md_file in folder_path.glob("*.md"):
+                try:
+                    content = md_file.read_text(encoding="utf-8")
+                    updated = _parse_frontmatter_date(content, "updated")
+                    if not updated:
+                        continue
+
+                    try:
+                        updated_dt = datetime.strptime(updated, "%Y-%m-%d")
+                    except ValueError:
+                        continue
+
+                    days_since_update = (now - updated_dt).days
+
+                    # Count insight log entries in this file
+                    insight_blocks = re.findall(r'- \d{4}-\d{2}-\d{2}:', content)
+                    insight_count = len(insight_blocks)
+                    age_days = days_since_update
+
+                    # Decision matrix
+                    if age_days >= 180:
+                        # Hard retire: never touched in 6+ months
+                        should_retire = True
+                        reason = "hard (180+ days)"
+                    elif age_days >= 90 and insight_count == 0:
+                        # Cold: old and completely empty of insights
+                        should_retire = True
+                        reason = "cold (90+ days, 0 insights)"
+                    elif age_days >= 120 and insight_count <= 1:
+                        # Low engagement: old with minimal activity
+                        should_retire = True
+                        reason = "low engagement (120+ days)"
+                    else:
+                        should_retire = False
+
+                    if not should_retire:
+                        continue
+
+                    examined += 1
+
+                    if dry_run:
+                        logger.info(
+                            "[WikiMaintenance] would retire (%s, updated %s, %d days ago, %d insights): %s",
+                            reason, updated, days_since_update, insight_count, md_file.name,
+                        )
+                        continue
+
+                    # Move to retired/
+                    retired_name = f"retired-{md_file.name}"
+                    retired_file = self._retired_path / retired_name
+                    md_file.rename(retired_file)
+                    logger.info(
+                        "[WikiMaintenance] retired (%s, updated %s, %d days ago, %d insights): %s -> %s",
+                        reason, updated, days_since_update, insight_count, md_file.name, retired_file.name,
+                    )
+                    retired += 1
+
+                except Exception as e:
+                    logger.debug("retire_stale_entries error on %s: %s", md_file.name, e)
+                    errors += 1
+
+        return {"examined": examined, "retired": retired, "errors": errors}
+
+    # ------------------------------------------------------------------
+    # 2. deduplicate_wiki
+    # ------------------------------------------------------------------
+
+    def deduplicate_wiki(self, dry_run: bool = False) -> dict:
+        """Merge visually duplicate daily log entries within the same monthly log.
+
+        Entries are considered duplicates if their normalized content matches
+        (ignoring date, tags, context). Only the most recent entry is kept.
+        """
+        log_dir = self._wiki_path / WIKI_STRUCTURE["insights_log"]
+        if not log_dir.exists():
+            return {"files_scanned": 0, "duplicates_found": 0, "duplicates_removed": 0}
+
+        files_scanned = 0
+        duplicates_found = 0
+        duplicates_removed = 0
+
+        for log_file in log_dir.glob("*.md"):
+            try:
+                content = log_file.read_text(encoding="utf-8")
+                original_len = len(content)
+
+                # Split into lines
+                lines = content.split("\n")
+                seen: dict[str, str] = {}  # normalized → full line (most recent wins)
+
+                # Pass 1: identify duplicates
+                for line in lines:
+                    date_str = _parse_daily_entry_date(line)
+                    if not date_str:
+                        continue
+                    normalized = _normalize_content(line)
+                    if not normalized:
+                        continue
+                    if normalized in seen:
+                        duplicates_found += 1
+                        seen[normalized] = line  # update to newer entry
+                    else:
+                        seen[normalized] = line
+
+                # Pass 2: collect lines to remove (older duplicates)
+                to_remove: set[str] = set()
+                for line in lines:
+                    date_str = _parse_daily_entry_date(line)
+                    if not date_str:
+                        continue
+                    normalized = _normalize_content(line)
+                    if not normalized:
+                        continue
+                    if normalized in seen and seen[normalized] != line:
+                        to_remove.add(line)
+                        seen[normalized] = line  # keep the newer one
+
+                if not to_remove:
+                    files_scanned += 1
+                    continue
+
+                # Remove duplicate lines
+                new_lines = [l for l in lines if l not in to_remove]
+                new_content = "\n".join(new_lines)
+
+                if dry_run:
+                    logger.info(
+                        "[WikiMaintenance] would dedup %s: remove %d duplicate lines",
+                        log_file.name, len(to_remove),
+                    )
+                else:
+                    log_file.write_text(new_content, encoding="utf-8")
+                    logger.info(
+                        "[WikiMaintenance] deduped %s: removed %d duplicate lines",
+                        log_file.name, len(to_remove),
+                    )
+
+                duplicates_removed += len(to_remove)
+                files_scanned += 1
+
+            except Exception as e:
+                logger.debug("deduplicate_wiki error on %s: %s", log_file.name, e)
+                files_scanned += 1
+
+        return {
+            "files_scanned": files_scanned,
+            "duplicates_found": duplicates_found,
+            "duplicates_removed": duplicates_removed,
+        }
+
+    # ------------------------------------------------------------------
+    # 3. autonomous_growth — gap detection + wiki augmentation
+    # ------------------------------------------------------------------
+
+    def detect_knowledge_gaps(self) -> List[str]:
+        """Identify topics the user has asked about but lack wiki coverage."""
+        gaps: List[str] = []
+
+        # Check if any entity files exist for recent topics
+        entities_path = self._wiki_path / "entities"
+        existing = (
+            {f.stem.replace("-", " ").lower() for f in entities_path.glob("*.md")}
+            if entities_path.exists()
+            else set()
+        )
+
+        # Common topic areas we track but may not have entries for
+        tracked_topics = [
+            "preferences", "communication-style", "environment",
+            "corrections", "user-profile",
+        ]
+        for topic in tracked_topics:
+            topic_key = topic.lower().replace("-", " ")
+            if topic_key not in existing and topic_key.replace(" ", "-") not in existing:
+                gaps.append(topic)
+
+        return gaps
+
+    def run_autonomous_maintenance(self, dry_run: bool = False) -> dict:
+        """Run all maintenance operations and return a summary dict."""
+        retire_result = self.retire_stale_entries(dry_run=dry_run)
+        dedup_result = self.deduplicate_wiki(dry_run=dry_run)
+        gaps = self.detect_knowledge_gaps()
+
+        return {
+            "retire": retire_result,
+            "dedup": dedup_result,
+            "gaps_detected": gaps,
+            "dry_run": dry_run,
+        }
+
+
+# ---------------------------------------------------------------------------
 # AutoLearner (Obsidian Wiki Edition)
 # ---------------------------------------------------------------------------
-
-
 class AutoLearner:
     """
     Extracts insights from conversation turns and writes to Obsidian wiki.
@@ -731,6 +1118,10 @@ class AutoLearner:
         # Track what's already learned to avoid duplicates
         self._learned: Set[str] = set()
         self._turn_count = 0
+
+        # Gap-filling: topics detected as missing from wiki
+        self._gap_insights: List[Insight] = []
+        self._suggested_gap_topics: List[str] = []
 
     def enable(self, wiki_path: Path) -> None:
         """Enable auto-learning and initialize wiki writer."""
@@ -816,12 +1207,258 @@ class AutoLearner:
 
         return user_saved, memory_saved
 
+    def on_session_end(self, messages: List[Dict[str, Any]]) -> Optional[Dict[str, int]]:
+        """Deep reflection at session end — analyze full conversation for patterns.
+
+        Called when the agent session closes (CLI exit, gateway disconnect, etc).
+        This is distinct from per-turn learn_from_turn which does lightweight
+        regex extraction. Session-end reflection can do:
+        - Full conversation summarization (via MiniMax)
+        - Cross-turn pattern detection
+        - Entity/concept linking to existing wiki entries
+        - Vector embedding for semantic search
+
+        Args:
+            messages: Full conversation history [{role, content}, ...]
+
+        Returns:
+            Optional dict with insight counts: {user, memory, concepts}
+            Returns None if disabled or no new insights found.
+        """
+        if not self._enabled or not self._writer or not messages:
+            return None
+
+        logger.debug("AutoLearn: session-end deep reflection on %d messages", len(messages))
+
+        # Collect conversation text for analysis
+        conversation_text = "\n".join(
+            f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
+            for msg in messages
+            if msg.get("content")
+        )
+
+        if len(conversation_text) < 20:
+            return None
+
+        # Extract session-level insights (topics, recurring patterns, etc.)
+        session_insights: List[Insight] = []
+
+        # Topic extraction: find repeated words across conversation
+        topic_pattern = re.compile(r'\b[a-z]{4,}\b', re.IGNORECASE)
+        topic_counts: Dict[str, int] = {}
+        for msg in messages:
+            content = msg.get("content", "")
+            for match in topic_pattern.finditer(content):
+                topic = match.group(0).strip()
+                if len(topic) > 3:
+                    topic_counts[topic] = topic_counts.get(topic, 0) + 1
+
+        # Save recurring topics as concept entries
+        for topic, count in sorted(topic_counts.items(), key=lambda x: -x[1])[:5]:
+            if count >= 2:
+                key = f"concept:{topic.lower()[:40]}"
+                if key not in self._learned:
+                    session_insights.append(
+                        Insight(
+                            target="memory",
+                            itype="concept",
+                            content=f"recurring topic: {topic} ({count}x)",
+                            context=f"Seen {count} times in conversation",
+                        )
+                    )
+                    self._learned.add(key)
+
+        # Save insights
+        saved = {"user": 0, "memory": 0, "concepts": 0}
+        for insight in session_insights:
+            if self._save_insight(insight):
+                if insight.target == "user":
+                    saved["user"] += 1
+                elif insight.itype == "concept":
+                    saved["concepts"] += 1
+                else:
+                    saved["memory"] += 1
+
+        if sum(saved.values()) > 0:
+            logger.debug(
+                "AutoLearn session-end: saved %s to Obsidian wiki",
+                saved,
+            )
+            try:
+                self._writer.update_index()
+            except Exception:
+                pass
+
+        return saved if sum(saved.values()) > 0 else None
+
+    # -----------------------------------------------------------------------
+    # P4-Cortex: Session Workflow Pattern Recording (per-turn)
+    # -----------------------------------------------------------------------
+
+    def record_workflow_pattern(
+        self,
+        tool_sequence: list[str],
+        task_type: str = "unknown",
+        turn_number: int = 0,
+        outcome: str = "success",
+        session_id: str = "",
+    ) -> bool:
+        """Record a tool sequence as a workflow pattern for P4-cortex growth.
+
+        Saves a JSON file to ~/.drewgent/P4-cortex/growth/patterns/ that is
+        later consumed by GrowthEngine to detect recurring workflows.
+
+        Args:
+            tool_sequence: List of tool names called in this turn
+            task_type: Classification of the task (e.g., "code_edit", "research")
+            turn_number: Which turn this was in the session
+            outcome: "success" or "failure"
+            session_id: Optional session identifier for linking
+
+        Returns:
+            True if pattern was saved, False otherwise
+        """
+        if not tool_sequence or len(tool_sequence) < 2:
+            return False
+
+        # Ensure patterns directory exists
+        _P4_CORTEX_PATTERNS_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Build a hash for deduplication and filename
+        seq_str = "_".join(tool_sequence)
+        seq_hash = hashlib.md5(seq_str.encode()).hexdigest[:8]
+        import time as _time
+
+        timestamp = _time.strftime("%Y%m%d%H%M%S")
+        filename = f"turn_workflow_{seq_hash}_{timestamp}.json"
+        filepath = _P4_CORTEX_PATTERNS_DIR / filename
+
+        pattern_data = {
+            "id": f"{seq_hash}-{timestamp}",
+            "type": "turn_workflow",
+            "description": f"Turn workflow: {' → '.join(tool_sequence)}",
+            "severity": "info",
+            "recommendation": f"Tool sequence used for {task_type} task",
+            "affected_items": tool_sequence,
+            "task_type": task_type,
+            "turn_number": turn_number,
+            "outcome": outcome,
+            "session_id": session_id,
+            "detected_at": _time.strftime("%Y-%m-%dT%H:%M:%S.%f"),
+        }
+
+        try:
+            filepath.write_text(json.dumps(pattern_data, indent=2), encoding="utf-8")
+            logger.debug(
+                "Recorded workflow pattern: %s → %s (%s turn %d)",
+                seq_str[:40],
+                outcome,
+                task_type,
+                turn_number,
+            )
+            return True
+        except Exception as e:
+            logger.debug("Failed to record workflow pattern: %s", e)
+            return False
+
+    def run_maintenance(self, dry_run: bool = False) -> dict:
+        """Run autonomous wiki maintenance: retire stale, dedup, detect gaps.
+
+        Call this from on_session_end or a periodic timer to keep the wiki
+        healthy without requiring user intervention.
+
+        Args:
+            dry_run: If True, only report what would be done (no file changes).
+
+        Returns:
+            Summary dict with retire/dedup/gaps results.
+        """
+        if not self._enabled or not self._wiki_path:
+            return {"error": "not enabled"}
+
+        maintenance = WikiMaintenance(self._wiki_path)
+        result = maintenance.run_autonomous_maintenance(dry_run=dry_run)
+
+        # Generate self-initiated growth suggestions from detected gaps
+        if not dry_run:
+            self._update_gap_insights(result.get("gaps_detected", []))
+
+        return result
+
+    def _update_gap_insights(self, gaps: List[str]) -> None:
+        """Update suggested gap topics that agent can proactively fill."""
+        if not gaps:
+            self._suggested_gap_topics = []
+            self._gap_insights = []
+            return
+
+        self._suggested_gap_topics = gaps
+
+        # Generate suggested insight entries for each gap
+        self._gap_insights = []
+        gap_itype_map = {
+            "preferences": "preference",
+            "communication-style": "communication",
+            "environment": "environment",
+            "corrections": "correction",
+            "user-profile": "identity",
+        }
+
+        for topic in gaps:
+            itype = gap_itype_map.get(topic, "insight")
+            self._gap_insights.append(
+                Insight(
+                    target="user",
+                    itype=itype,
+                    content=f"Consider exploring: {topic}",
+                    context="knowledge gap detected — agent should investigate and fill",
+                    lifetime_days=7,  # short-lived: fill or forget
+                )
+            )
+
+    def get_growth_suggestions(self) -> List[Insight]:
+        """Return suggested gap-filling insights for agent to pursue."""
+        return self._gap_insights
+
+    def get_suggested_topics(self) -> List[str]:
+        """Return list of topic names that have gaps."""
+        return list(self._suggested_gap_topics)
+
+    def fill_gap(self, topic: str, content: str, itype: str = "insight") -> bool:
+        """Record a self-initiated insight to fill a detected gap."""
+        gap_itype_map = {
+            "preferences": "preference",
+            "communication-style": "communication",
+            "environment": "environment",
+            "corrections": "correction",
+            "user-profile": "identity",
+        }
+
+        insight = Insight(
+            target="user",
+            itype=gap_itype_map.get(topic, itype),
+            content=content,
+            context=f"self-initiated fill for gap: {topic}",
+            lifetime_days=90,
+        )
+
+        saved = self._save_insight(insight)
+        if saved:
+            if topic in self._suggested_gap_topics:
+                self._suggested_gap_topics.remove(topic)
+            self._gap_insights = [g for g in self._gap_insights if topic not in g.content]
+            logger.info("[AutoLearner] filled gap '%s': %s", topic, content[:60])
+        return saved
+
     def _extract_insights(self, user_text: str, assistant_text: str) -> List[Insight]:
         """Extract insights from conversation text."""
         insights: List[Insight] = []
 
-        if not user_text or len(user_text) < 3:
+        if not user_text or len(user_text) < 1:
             return insights
+
+        # Also allow very short meaningful content through
+        # (don't require 3+ chars since implicit patterns handle short inputs)
 
         # Extract user preferences
         for pattern, itype in _USER_PATTERNS:
@@ -903,6 +1540,21 @@ class AutoLearner:
                             )
                         )
                         self._learned.add(key)
+
+        # Extract implicit preferences from short/command inputs
+        implicit = _detect_implicit_style(user_text)
+        if implicit:
+            itype, content = implicit
+            key = f"implicit:{itype}:{user_text.strip().lower()[:30]}"
+            if key not in self._learned:
+                insights.append(
+                    Insight(
+                        target="user",
+                        itype=itype,
+                        content=content,
+                    )
+                )
+                self._learned.add(key)
 
         return insights
 
@@ -1007,3 +1659,240 @@ class AutoLearner:
             }
             for r in results
         ]
+
+    def read_wiki_for_context(self, max_entries: int = 10, max_chars: int = 4000) -> str:
+        """Read wiki entries for context injection into system prompt.
+
+        Reads recent entries from entities/, concepts/, and insights/ folders
+        and formats them for context injection.
+
+        Args:
+            max_entries: Maximum number of entries per category
+            max_chars: Maximum total characters
+
+        Returns:
+            Formatted wiki context string, or empty string if no wiki path
+        """
+        if not self._wiki_path:
+            return ""
+
+        context_parts = []
+        total_chars = 0
+
+        # Read from each wiki category
+        for folder, label in [
+            ("entities", "Entities"),
+            ("concepts", "Concepts"),
+            ("insights", "Insights"),
+        ]:
+            folder_path = self._wiki_path / folder
+            if not folder_path.exists():
+                continue
+
+            entries = []
+            for md_file in sorted(folder_path.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[:max_entries]:
+                try:
+                    content = md_file.read_text(encoding="utf-8")
+                    # Extract log entries (lines starting with - date:)
+                    for line in content.split("\n"):
+                        if line.strip().startswith("- 20"):
+                            entries.append(line.strip())
+                except Exception:
+                    continue
+
+            if entries:
+                # Limit entries for this folder
+                folder_entries = []
+                for entry in entries[:max_entries]:
+                    if total_chars + len(entry) + 50 > max_chars:
+                        break
+                    folder_entries.append(entry)
+                    total_chars += len(entry) + 1
+
+                if folder_entries:
+                    context_parts.append(f"## {label}\n" + "\n".join(folder_entries))
+
+        if not context_parts:
+            return ""
+
+        # Build wiki context with header
+        wiki_context = """═══════════════════════════════════════════════
+WIKI KNOWLEDGE BASE (Obsidian)
+═══════════════════════════════════════════════
+Reference these facts when answering. Wiki-links like [[entities/environment]] 
+connect related concepts.
+
+"""
+        wiki_context += "\n\n".join(context_parts)
+        wiki_context += "\n═══════════════════════════════════════════════"
+
+        return wiki_context
+
+    # --------------------------------------------------------------------------
+    # Public API for brain_tool.py — active brain access
+    # --------------------------------------------------------------------------
+
+    def save_insight(self, insight: Insight) -> bool:
+        """Public method to save an insight directly to the brain.
+
+        Used by brain_tool.brain_record() for explicit agent recording.
+        """
+        return self._save_insight(insight)
+
+    def query_wiki(
+        self,
+        query: str,
+        context: str = "",
+        max_results: int = 5,
+        max_chars: int = 2000,
+    ) -> str:
+        """Query wiki for contextually relevant knowledge.
+
+        Active querying method used by brain_tool.brain_query().
+        Combines text search with semantic search for comprehensive results.
+
+        Args:
+            query: What to search for
+            context: Current task context for relevance ranking
+            max_results: Maximum entries to return
+            max_chars: Maximum response size
+
+        Returns:
+            Formatted string of relevant wiki entries
+        """
+        if not self._wiki_path:
+            return ""
+
+        query_lower = query.lower().strip()
+        context_lower = context.lower().strip()
+
+        # Collect candidates from wiki folders
+        candidates = []
+        for folder in ("entities", "concepts", "insights"):
+            folder_path = self._wiki_path / folder
+            if not folder_path.exists():
+                continue
+            for md_file in folder_path.glob("*.md"):
+                try:
+                    content = md_file.read_text(encoding="utf-8")
+                    self._extract_entries_from_file(
+                        content, query_lower, context_lower, candidates, md_file
+                    )
+                except Exception:
+                    continue
+
+        if not candidates:
+            # Fallback 1: semantic search
+            if self._vector_store:
+                sem_results = self.semantic_search(query, limit=max_results)
+                if sem_results:
+                    high_quality = [r for r in sem_results if r["score"] >= 0.5]
+                    if high_quality:
+                        self._touch_result_ids(high_quality)
+                        return self._format_wiki_query_results(high_quality, max_chars)
+
+            # Fallback 2: gap knowledge — if query relates to a known gap topic,
+            # offer the gap insight so the agent can self-initiate filling it
+            gap_suggestions = self.get_growth_suggestions()
+            if gap_suggestions:
+                query_lower = query.lower().strip()
+                for gi in gap_suggestions:
+                    if query_lower in gi.content.lower() or query_lower in gi.itype.lower():
+                        lines = [
+                            "## Brain Query Results",
+                            f"[GAP DETECTED] {gi.content}",
+                            f"Topic: {gi.itype}",
+                            "(Use brain_record to fill this gap)",
+                        ]
+                        return "\n".join(lines)
+
+            return ""
+
+        # Sort by relevance: query match > context match > recency
+        def relevance_score(item):
+            score = 0
+            # Query keyword match
+            if query_lower in item["content"].lower():
+                score += 10
+            # Context keyword match
+            if context_lower and context_lower in item["content"].lower():
+                score += 5
+            # Recent entries get slight boost
+            if item.get("recency", 0) > 0:
+                score += item["recency"] * 0.1
+            # Prefer user preferences over general insights
+            if item.get("target") == "user":
+                score += 2
+            return score
+
+        candidates.sort(key=relevance_score, reverse=True)
+        results = candidates[:max_results]
+
+        # Track access for returned entries
+        self._touch_result_ids(results)
+
+        # Format results
+        return self._format_wiki_query_results(results, max_chars)
+
+    def _extract_entries_from_file(
+        self, content: str, query_lower: str, context_lower: str,
+        candidates: list, md_file: Path = None
+    ) -> None:
+        """Extract relevant entries from a wiki file."""
+        for line in content.split("\n"):
+            if not line.strip().startswith("- 20"):
+                continue
+            line_lower = line.lower()
+            # Match if query appears anywhere in the line
+            if query_lower and query_lower not in line_lower:
+                # Try individual words for partial matching
+                query_words = query_lower.split()
+                if not any(w in line_lower for w in query_words if len(w) >= 3):
+                    continue
+            # Generate stable ID for access tracking
+            entry_id = self._make_entry_id(line.strip(), md_file)
+            candidates.append({
+                "content": line.strip(),
+                "line": line.strip(),
+                "target": "user" if " #user" in line_lower else "memory",
+                "recency": 0,
+                "id": entry_id,
+            })
+
+    def _make_entry_id(self, line: str, md_file: Path = None) -> str:
+        """Create a stable ID for a wiki entry matching VectorStore format."""
+        # Derive insight ID from first 30 chars of content (same as _store_embedding)
+        content_snippet = line[:30].replace(" ", "_").replace("\n", "")
+        return f"general_{content_snippet}"
+
+    def _touch_result_ids(self, results: list[dict]) -> None:
+        """Record access for all result IDs that have vector entries."""
+        if not self._vector_store:
+            return
+        for r in results:
+            entry_id = r.get("id", "")
+            if entry_id:
+                self._vector_store.touch(entry_id)
+
+    def _format_wiki_query_results(self, results: list[dict], max_chars: int) -> str:
+        """Format wiki query results into readable string."""
+        if not results:
+            return ""
+
+        lines = []
+        total = 0
+        for r in results:
+            content = r.get("content", r.get("line", ""))
+            if not content:
+                continue
+            lines.append(content)
+            total += len(content) + 1
+            if total > max_chars:
+                break
+
+        if not lines:
+            return ""
+
+        header = "## Brain Query Results\n"
+        body = "\n".join(lines)
+        return header + body

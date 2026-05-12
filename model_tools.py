@@ -23,6 +23,7 @@ Public API (signatures preserved from the original 2,400-line version):
 import json
 import asyncio
 import logging
+import os
 import threading
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -135,6 +136,15 @@ def _discover_tools():
     Wrapped in a function so import errors in optional tools (e.g., fal_client
     not installed) don't prevent the rest from loading.
     """
+    # Add orchestrator path for orchestrate_tool
+    import sys
+    import pathlib
+    _drew_home = pathlib.Path(os.environ.get("DREW_HOME", pathlib.Path.home() / ".drewgent"))
+    _orchestrator_path = _drew_home / "source" / "_agent" / "orchestrator"
+    if _orchestrator_path.exists() and str(_orchestrator_path) not in sys.path:
+        sys.path.insert(0, str(_orchestrator_path))
+        logger.info(f"[model_tools] Added orchestrator path: {_orchestrator_path}")
+
     _modules = [
         "tools.web_tools",
         "tools.terminal_tool",
@@ -159,6 +169,13 @@ def _discover_tools():
         "tools.send_message_tool",
         # "tools.honcho_tools",  # Removed — Honcho is now a memory provider plugin
         "tools.homeassistant_tool",
+        "tools.brain_tool",
+
+        # Test tool
+        "tools.super_tool",
+
+        # Orchestrator tool (external)
+        "orchestrate_tool",
     ]
     import importlib
     for mod_name in _modules:
@@ -196,6 +213,52 @@ TOOLSET_REQUIREMENTS: Dict[str, dict] = registry.get_toolset_requirements()
 # Resolved tool names from the last get_tool_definitions() call.
 # Used by code_execution_tool to know which tools are available in this session.
 _last_resolved_tool_names: List[str] = []
+_last_resolved_tool_names_lock = threading.Lock()
+
+
+class _LastResolvedToolNamesContext:
+    """
+    Thread-safe context manager for _last_resolved_tool_names.
+
+    Provides atomic access to the global tool names list for read/write operations.
+    Uses a reentrant lock to allow nested access within the same thread.
+
+    Usage:
+        with LastResolvedToolNamesContext() as tools:
+            tools.set(['tool1', 'tool2'])
+            names = tools.get()
+    """
+
+    def __init__(self):
+        self._lock = _last_resolved_tool_names_lock
+
+    def __enter__(self):
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, *args):
+        self._lock.release()
+
+    def get(self) -> List[str]:
+        return list(_last_resolved_tool_names)
+
+    def set(self, names: List[str]) -> None:
+        global _last_resolved_tool_names
+        _last_resolved_tool_names = list(names)
+
+
+# Convenience function for code that just needs to read
+def get_last_resolved_tool_names() -> List[str]:
+    """Thread-safe getter for _last_resolved_tool_names."""
+    with _last_resolved_tool_names_lock:
+        return list(_last_resolved_tool_names)
+
+
+def set_last_resolved_tool_names(names: List[str]) -> None:
+    """Thread-safe setter for _last_resolved_tool_names."""
+    with _last_resolved_tool_names_lock:
+        global _last_resolved_tool_names
+        _last_resolved_tool_names = list(names)
 
 
 # =============================================================================
@@ -349,7 +412,8 @@ def get_tool_definitions(
             print("🛠️  No tools selected (all filtered out or unavailable)")
 
     global _last_resolved_tool_names
-    _last_resolved_tool_names = [t["function"]["name"] for t in filtered_tools]
+    with _last_resolved_tool_names_lock:
+        _last_resolved_tool_names = [t["function"]["name"] for t in filtered_tools]
 
     return filtered_tools
 
@@ -514,7 +578,7 @@ def handle_function_call(
         if function_name == "execute_code":
             # Prefer the caller-provided list so subagents can't overwrite
             # the parent's tool set via the process-global.
-            sandbox_enabled = enabled_tools if enabled_tools is not None else _last_resolved_tool_names
+            sandbox_enabled = enabled_tools if enabled_tools is not None else get_last_resolved_tool_names()
             result = registry.dispatch(
                 function_name, function_args,
                 task_id=task_id,
