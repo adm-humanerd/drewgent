@@ -1,216 +1,232 @@
-<p align="center">
-  <img src="assets/banner.png" alt="Drewgent Agent" width="100%">
-</p>
-
 # Drewgent Agent ☤
 
-> **⚠️ NOTE:** Drewgent is a **fork of [Hermes-Agent](https://github.com/adm-humanerd/hermes-agent)** by Nous Research, optimized for constrained environments and extended with Knowledge Bus & Feedback Loop.
+> **Drewgent** is a fork of [Hermes-Agent](https://github.com/NousResearch/hermes-agent) by Nous Research, customized for personal use by [HUMANERD](https://humanerd.ai). This fork adds brain-governed behavior, knowledge persistence, and a feedback loop — while remaining a drop-in replacement for Hermes-Agent.
 
 <p align="center">
-  <a href="https://github.com/adm-humanerd/drewgent"><img src="https://img.shields.io/badge/Fork%20of-Hermes--Agent-orange?style=for-the-badge" alt="Fork of Hermes-Agent"></a>
-  <a href="https://github.com/adm-humanerd/drewgent/blob/main/docs/DREWGENT_ARCHITECTURE.md"><img src="https://img.shields.io/badge/Docs-Architecture-FFD700?style=for-the-badge" alt="Documentation"></a>
+  <a href="https://github.com/adm-humanerd/drewgent"><img src="https://img.shields.io/badge/GitHub-adm--humanerd/drewgent-orange?style=for-the-badge" alt="GitHub"></a>
   <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://github.com/adm-humanerd/drewgent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://humanerd.ai"><img src="https://img.shields.io/badge/Built%20by-HUMANERD-blueviolet?style=for-the-badge" alt="Built by HUMANERD"></a>
 </p>
 
-**Drewgent** is a self-improving AI agent built by [HUMANERD](https://humanerd.ai). Built on Hermes-Agent, it features a built-in **Knowledge Bus** and **Feedback Loop** — every response is verified, stored, and used to improve future responses.
+---
 
-## Why Drewgent?
+## What is this fork?
 
-While Hermes-Agent is a general-purpose agent, Drewgent (a fork) is **optimized for limited environments** (like a $5 VPS or home lab). It includes:
+Hermes-Agent runs everywhere. Drewgent runs **your way** — from the LLM provider you choose to the colors you see at boot.
 
-- **Docker-First Architecture**: Pre-built images, no `git clone` required
-- **Local Monitoring**: Hourly Discord notifications without external services
-- **Knowledge Bus**: Patterns learned from experience persist across sessions
-- **Built-in Verification**: Quality gates catch hallucinations before they happen
+This repo is a **fully forkable, self-contained** Drewgent setup. Clone it, configure your provider and skin, run it. No account required.
 
-## The Story Behind Drewgent
-
-Drewgent was born from solving real problems in constrained environments:
-
-### The Journey
-
-```
-💀 Problem: "Docker build times out on Colima"
-   ↓
-💡 Solution: Use pre-built images, volume mount for code changes
-   
-💀 Problem: "Need to monitor the agent but no external services"
-   ↓
-💡 Solution: Custom monitor script → Discord webhook
-   
-💀 Problem: "Tailscale DNS intercepts all DNS queries"
-   ↓
-💡 Solution: Monitor runs in Docker, health checks via localhost
-   
-💀 Problem: "Cloudflare Tunnel created in wrong account"
-   ↓
-💡 Solution: Docker Hub images + local monitoring = no tunnel needed
-   
-💀 Problem: "How to improve agent over time?"
-   ↓
-💡 Solution: Knowledge Bus + Verification Engine + Feedback Loop
-```
-
-### Key Optimizations
-
-| Problem | Solution |
-|---------|----------|
-| Docker build timeout (Colima 120s) | Pre-built images on Docker Hub |
-| Mac DNS intercepted by Tailscale | Docker network_mode: host + localhost checks |
-| No external monitoring available | Custom Discord monitor script |
-| Agent doesn't learn from mistakes | Knowledge Bus stores verification results |
-| Multiple services, complex setup | docker-compose.yml with restart: unless-stopped |
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Drewgent Agent                          │
-├─────────────────────────────────────────────────────────────┤
-│  Gateway → Agent → Knowledge Bus ← Verification Engine     │
-│                              ↑                               │
-│                          Growth Engine                        │
-│                              ↑                               │
-│                          Revision Loop                        │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### The Feedback Loop
-
-Drewgent doesn't just respond — it **learns**:
-
-1. **Verification**: Every response is checked for quality (Korean language priority, hallucination detection, completeness)
-2. **Storage**: Failed checks are stored in Knowledge Bus
-3. **Query**: Future verifications query past patterns
-4. **Improvement**: The agent gets better over time
+---
 
 ## Quick Start
 
-### Prerequisites
-- Docker & Docker Compose
-- API keys (Anthropic, OpenAI, MiniMax)
-- Discord webhook (optional, for monitoring)
+```bash
+# 1. Clone
+git clone https://github.com/adm-humanerd/drewgent.git
+cd drewgent
 
-### Installation
+# 2. Install
+uv venv .venv --python 3.11
+source .venv/bin/activate
+uv pip install -e ".[all]"
+
+# 3. Configure — pick your provider below
+cp .env.example .env
+# Edit .env and add your API key
+
+# 4. Run
+drewgent
+```
+
+That's it. See [Configuration](#configuration) below to set your provider and skin.
+
+---
+
+## Configuration
+
+All config is in `~/.drewgent/config.yaml` (created on first run via `drewgent setup`) and `~/.drewgent/.env` (API keys only).
+
+### LLM Provider Setup
+
+Edit `~/.drewgent/.env` and uncomment the provider you want. **Only one is needed.**
 
 ```bash
-# 1. Pull the image (no git clone needed!)
-docker pull humanerdkr/drewgent:latest
+# ── Pick one ──────────────────────────────────────────────
 
-# 2. Create directory
-mkdir -p data
+# MiniMax (default for this fork)
+MINIMAX_API_KEY=your_key_here
 
-# 3. Create .env file
-cat > .env << 'EOF'
-ANTHROPIC_API_KEY=your_key
-OPENAI_API_KEY=your_key
-MINIMAX_API_KEY=your_key
-DREW_DISCORD_WEBHOOK=https://discord.com/api/webhooks/YOUR_WEBHOOK
-EOF
+# OpenRouter (access to 200+ models via OpenAI-compatible API)
+OPENROUTER_API_KEY=your_key_here
 
-# 4. Copy docker-compose.yml
-cp docker-compose.yml.example docker-compose.yml
+# Google Gemini
+GOOGLE_API_KEY=your_key_here
 
-# 5. Start
-docker-compose up -d
+# Z.ai / Zhipu GLM
+GLM_API_KEY=your_key_here
+
+# Kimi / Moonshot
+KIMI_API_KEY=your_key_here
+
+# OpenCode Zen (curated models, pay-as-you-go)
+OPENCODE_ZEN_API_KEY=your_key_here
+
+# Hugging Face (routes to 20+ open models)
+HF_TOKEN=your_token_here
 ```
 
-That's it. No `git clone`, no dependency installation, no build steps.
-
-> **⚠️ SECURITY:** Never commit your `.env` file or `docker-compose.yml` with real API keys. The example file uses environment variables — keep your secrets safe!
-
-## Docker Images
-
-| Image | Description | Pull Command |
-|-------|-------------|--------------|
-| `humanerdkr/drewgent:latest` | Gateway + Agent | `docker pull humanerdkr/drewgent:latest` |
-| `humanerdkr/drewgent-monitor:latest` | Discord Monitor | `docker pull humanerdkr/drewgent-monitor:latest` |
-
-### Rename as You Like
+After adding your key, switch to it:
 
 ```bash
-# Pull and rename to your brand
-docker pull humanerdkr/drewgent:latest
-docker tag humanerdkr/drewgent:latest my-cool-agent:latest
+drewgent model          # interactive model picker
+# Or: drewgent setup    # full setup wizard
 ```
 
-## Monitoring
+The agent uses whatever provider you configured. No code changes needed.
 
-The Monitor service sends hourly reports to Discord:
+### Skin / Theme Setup
 
-- **Health Status**: Is the gateway alive?
-- **Verification Stats**: Pass rate, average score, P0 blocks
-- **Knowledge Bus**: Patterns learned, growth over time
-- **Morning Summary**: 8 AM report of midnight-to-8AM activity
+The CLI boots with a banner and animated spinner. All of it is customizable via YAML skins.
 
+**Option A — Use a built-in skin:**
+
+Edit `~/.drewgent/config.yaml`:
+
+```yaml
+display:
+  skin: ares      # alternatives: default, mono, slate, ares
 ```
-⏰ Every hour (except midnight-8AM): Full metrics report
-🌅 8 AM: Night summary
-```
 
-## API Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /health` | Health check |
-| `GET /v1/metrics` | Verification metrics |
-| `GET /v1/knowledge` | Knowledge Bus data |
-| `GET /v1/models` | Available models |
-
-## Troubleshooting
-
-### "No module named 'drewgent_constants'"
-
-Fixed in the Docker image. Make sure you're using the latest:
 ```bash
-docker pull humanerdkr/drewgent:latest
+# Or change at runtime
+drewgent            # then type: /skin ares
 ```
 
-### "Docker build times out"
+**Option B — Create your own skin:**
 
-Don't build locally — use the pre-built image:
 ```bash
-docker pull humanerdkr/drewgent:latest
+mkdir -p ~/.drewgent/skins
 ```
 
-### "Monitor can't reach gateway"
+Create `~/.drewgent/skins/mydesign.yaml`:
 
-Make sure all services use `network_mode: host` for localhost access.
+```yaml
+name: mydesign
+description: My custom Drewgent skin
 
-## Documentation
+colors:
+  banner_border: "#4169E1"
+  banner_title: "#FFD700"
+  banner_text: "#F0F8FF"
 
-- [Architecture Guide](./docs/DREWGENT_ARCHITECTURE.md) - Full architecture, module connections, optimization decisions
-- [Knowledge Bus](./docs/PDCA_KNOWLEDGE_BUS.md) - How the feedback loop works
-- [Development Guide](./AGENTS.md) - For contributors
+spinner:
+  waiting_faces:
+    - "(◕‿◕)"
+    - "(｡◕‿◕｡)"
+  thinking_faces:
+    - "(¢‿¢)"
+    - "(◕ᴗ◕)"
+  thinking_verbs:
+    - "thinking"
+    - "pondering"
 
-## Lessons Learned
+branding:
+  agent_name: "My Drewgent"
+  welcome: "Welcome to my agent!"
+  goodbye: "See you! ✨"
+  response_label: " ⚕ MyAgent "
+  prompt_symbol: "❯ "
 
-Building Drewgent taught us important lessons about **constrained environments**:
+tool_prefix: "┊"
+tool_emojis:
+  terminal: "⚔"
+  web_search: "🔮"
+```
 
-1. **Pre-built images > local builds**: Colima's 120s timeout makes local builds unreliable
-2. **Docker networking quirks**: `network_mode: host` avoids Docker's DNS issues
-3. **VPNs can break DNS**: Tailscale intercepts all DNS queries by default
-4. **Cloudflare Tunnel account isolation**: Always verify which account you're using
-5. **Feedback loops improve quality**: Storing verification results makes the agent smarter over time
+Then set `display.skin: mydesign` in `config.yaml` or use `/skin mydesign` in the CLI.
 
-## Security
+**What you can customize:**
 
-### Best Practices
+| Element | Key | Example |
+|---------|-----|---------|
+| Logo ASCII art | `banner_logo` | `"[bold #FF0000] MY LOGO"` |
+| Hero art | `banner_hero` | `"[#CD7F32] ═══════"` |
+| Banner colors | `colors.*` | `banner_border: "#CD7F32"` |
+| Spinner faces | `spinner.waiting_faces` | `["(◕‿◕)"]` |
+| Spinner verbs | `spinner.thinking_verbs` | `["forging", "thinking"]` |
+| Spinner wings | `spinner.wings` | `[["⟪⚔", "⚔⟫"]]` |
+| Agent name | `branding.agent_name` | `"My Drewgent"` |
+| Response label | `branding.response_label` | `" ⚕ Drewgent "` |
+| Tool emojis | `tool_emojis.*` | `terminal: "⚔"` |
 
-1. **Never commit secrets**: Your `.env` file contains API keys — never commit it to version control
-2. **Use environment variables**: All secrets are loaded from `.env` or environment variables
-3. **Docker secrets**: Use Docker secrets or environment variables for sensitive data in production
+Built-in skins: `default` (gold kawaii), `ares` (crimson war-god), `mono` (grayscale), `slate` (cool blue).
 
-### Files You Need to Create
+---
 
-| File | Contains | GitHub |
-|------|----------|--------|
-| `.env` | API keys, webhook URLs | ❌ Never commit |
-| `docker-compose.yml` | Service config | ✅ Use example |
-| `~/.drewgent/` | User config, memories | ❌ Never commit |
+## Project Structure
+
+```
+drewgent/
+├── run_agent.py          # Core agent loop, tool dispatch
+├── cli.py                # Interactive TUI (banner, spinner, input)
+├── model_tools.py        # Tool registry and dispatch
+├── toolsets.py           # Tool groupings
+├── drewgent_state.py       # SQLite session store (FTS5 search)
+├── agent/                # Agent internals
+│   ├── prompt_builder.py     # System prompt assembly
+│   ├── brain_signals.py      # Brain signal tracking
+│   ├── signal_processor.py   # Workflow state machine
+│   ├── auto_learn.py        # Wiki maintenance, gap detection
+│   └── display.py           # KawaiiSpinner
+├── drewgent_cli/           # CLI commands
+│   ├── setup.py             # Interactive setup wizard
+│   ├── auth.py              # Provider authentication
+│   ├── skin_engine.py       # Skin/theme engine
+│   ├── banner.py            # Banner ASCII art
+│   └── commands.py          # Slash command registry
+├── tools/                # Tool implementations
+├── gateway/              # Messaging platform gateway
+└── docs/
+    └── DREWGENT_ARCHITECTURE.md
+```
+
+---
+
+## Development
+
+```bash
+# Install
+git clone https://github.com/adm-humanerd/drewgent.git
+cd drewgent
+uv venv .venv --python 3.11
+source .venv/bin/activate
+uv pip install -e ".[all]"
+
+# Test
+pytest tests/ -q
+
+# Run
+drewgent
+```
+
+---
+
+## Customizing Further
+
+### Adding a new LLM provider to the code
+
+Providers are defined in `drewgent_cli/auth.py` (`PROVIDER_REGISTRY`) and `drewgent_cli/models.py`. To add a new provider:
+
+1. Add a `ProviderConfig` entry in `PROVIDER_REGISTRY`
+2. Add model list to `_DEFAULT_PROVIDER_MODELS` in `setup.py`
+3. Register any special handling in `models.py` if needed
+
+### Brain governance
+
+Drewgent's behavior is governed by neuron files in `P0-brainstem/brain/`. This is specific to this fork and not part of the upstream Hermes-Agent.
+
+---
 
 ## License
 
-MIT License - HUMANERD
+MIT — [HUMANERD](https://humanerd.ai)
