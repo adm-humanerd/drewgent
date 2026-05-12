@@ -413,15 +413,84 @@ def clear_current_project() -> None:
         _CURRENT_PROJECT_FILE.unlink()
 
 
+def _detect_current_project() -> Optional[str]:
+    """Auto-detect the current project from git worktree or nearest .brain directory.
+
+    Detection priority:
+    1. Already set: return `.current_project` content if exists
+    2. Git worktree: find worktree containing current CWD, use its name
+    3. Nearest `.brain` ancestor: search parent dirs for `.brain/` directory
+    4. Fallback: None (no project set)
+
+    Returns:
+        Project name string or None if no project detected
+    """
+    # Priority 1: Already set
+    existing = get_current_project_name()
+    if existing:
+        return existing
+
+    import subprocess, os
+
+    # Priority 2: Git worktree detection
+    try:
+        cwd = os.getcwd()
+        result = subprocess.run(
+            ["git", "worktree", "list", "--json"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            import json as _json
+
+            try:
+                worktrees = _json.loads(result.stdout)
+                for wt in worktrees:
+                    wt_path = wt.get("path", "")
+                    if wt_path and cwd.startswith(wt_path):
+                        # Extract project name from worktree path
+                        # e.g., /Users/drew/projects/clientX → clientX
+                        project_name = Path(wt_path).name
+                        save_current_project(project_name)
+                        return project_name
+            except _json.JSONDecodeError:
+                # Fallback to line parsing
+                for line in result.stdout.splitlines():
+                    if not line.strip():
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 1:
+                        wt_path = Path(parts[0]).resolve()
+                        if cwd.startswith(str(wt_path)):
+                            project_name = wt_path.name
+                            save_current_project(project_name)
+                            return project_name
+    except Exception:
+        pass
+
+    # Priority 3: Nearest `.brain` ancestor
+    cwd_path = Path.cwd()
+    for parent in [cwd_path] + list(cwd_path.parents):
+        brain_dir = parent / ".brain"
+        if brain_dir.is_dir():
+            project_name = parent.name
+            save_current_project(project_name)
+            return project_name
+
+    return None
+
+
 def build_project_context_prompt() -> str:
     """Build a project context prompt from the current project.
 
     Call this when building the system prompt to inject project context.
+    Auto-detects project if none is currently set.
 
     Returns:
         Project context string if a project is set, empty string otherwise
     """
     project_name = get_current_project_name()
+    if not project_name:
+        project_name = _detect_current_project()
     if not project_name:
         return ""
 

@@ -230,7 +230,7 @@ def _scan_neuron(neuron_path: Path, layer: str) -> Optional[NeuronInfo]:
         
         content = ""
         try:
-            content = neuron_path.read_text(encoding="utf-8")[:500]
+            content = neuron_path.read_text(encoding="utf-8")
         except Exception:
             pass
         
@@ -433,6 +433,84 @@ def unbomb_neuron(path: str) -> tuple[bool, str]:
 # Brain Emission
 # =============================================================================
 
+def get_layer_content(layer_path: Path, layer_name: str) -> str:
+    """Read full content of all neuron files in a layer directory.
+    
+    Args:
+        layer_path: Path to the layer directory
+        layer_name: Name of the layer (e.g., "P0-brainstem")
+    
+    Returns:
+        Full content of all .neuron, .rule, and .md files in the layer
+    """
+    if not layer_path.exists():
+        return ""
+    
+    content_parts = []
+    
+    # Scan for all neuron files in this layer directory (not subdirectories)
+    for item in layer_path.iterdir():
+        if item.is_file() and item.suffix in NEURON_EXTENSIONS:
+            if item.name == BOMB_FILE:
+                continue
+            try:
+                file_content = item.read_text(encoding="utf-8")
+                if file_content.strip():
+                    content_parts.append(f"\n--- {item.name} ---\n{file_content}")
+            except Exception:
+                pass
+        elif item.is_dir():
+            # Also scan files in subdirectories (like 禁 subdirectory in P0)
+            for sub_item in item.iterdir():
+                if sub_item.is_file() and sub_item.suffix in NEURON_EXTENSIONS:
+                    if sub_item.name == BOMB_FILE:
+                        continue
+                    try:
+                        file_content = sub_item.read_text(encoding="utf-8")
+                        if file_content.strip():
+                            content_parts.append(f"\n--- {sub_item.name} ---\n{file_content}")
+                    except Exception:
+                        pass
+    
+    return "".join(content_parts)
+
+
+def emit_layer_content(layer_path: Path, layer_name: str, depth: int = 0) -> list[str]:
+    """Emit full content for a layer as governance text.
+    
+    Args:
+        layer_path: Path to the layer directory
+        layer_name: Name of the layer (e.g., "P0-brainstem")
+        depth: Indentation depth for nested output
+    
+    Returns:
+        List of formatted lines for the layer
+    """
+    result = []
+    indent = "  " * depth
+    
+    description = BRAIN_LAYER_DESCRIPTIONS.get(layer_name, "")
+    
+    result.append(f"{indent}### {layer_name}")
+    if description:
+        result.append(f"{indent}*{description}*")
+    result.append("")
+    
+    # Get full content from all neuron files
+    full_content = get_layer_content(layer_path, layer_name)
+    
+    if full_content:
+        # Split and add with proper indentation
+        for line in full_content.splitlines():
+            result.append(f"{indent}{line}")
+        result.append("")
+    else:
+        result.append(f"{indent}[No neurons loaded for this layer]")
+        result.append("")
+    
+    return result
+
+
 def emit_brain(name: Optional[str] = None) -> tuple[bool, str]:
     """Emit the brain content as governance text.
     
@@ -462,39 +540,38 @@ def emit_brain(name: Optional[str] = None) -> tuple[bool, str]:
         "",
     ]
     
-    def emit_layer(layer: BrainLayer, depth: int = 0) -> list[str]:
-        result = []
-        indent = "  " * depth
+    # Iterate through ALL 7 layers (not just brain.layers which only has scanned layers)
+    for layer_name in BRAIN_LAYERS:
+        layer_path = brain.path / layer_name
         
         # Skip if bombed
-        if layer.path.exists() and (layer.path / BOMB_FILE).exists():
-            return result
+        if layer_path.exists() and (layer_path / BOMB_FILE).exists():
+            continue
         
-        result.append(f"{indent}### {layer.name}")
-        if layer.description:
-            result.append(f"{indent}*{layer.description}*")
-        result.append("")
+        # Always show the layer header with description
+        description = BRAIN_LAYER_DESCRIPTIONS.get(layer_name, "")
+        lines.append(f"### {layer_name}")
+        if description:
+            lines.append(f"*{description}*")
+        lines.append("")
         
-        # Emit neurons in this layer
-        for neuron in layer.neurons:
-            if neuron.is_bombed:
-                continue
-            result.append(f"{indent}**{neuron.name}**")
-            if neuron.content:
-                for line in neuron.content.splitlines()[:10]:
-                    result.append(f"{indent}  {line}")
-            result.append("")
-        
-        # Emit sublayers
-        for sublayer in layer.sublayers:
-            if (sublayer.path / BOMB_FILE).exists():
-                continue
-            result.extend(emit_layer(sublayer, depth + 1))
-        
-        return result
-    
-    for layer in brain.layers:
-        lines.extend(emit_layer(layer))
+        # Get all neurons in this layer (full content, not truncated)
+        if layer_path.exists():
+            # Get full content from all neuron files
+            full_content = get_layer_content(layer_path, layer_name)
+            
+            if full_content:
+                # For P0, keep the FORBIDDEN token prefix visible
+                # For other layers, just show the content
+                for line in full_content.splitlines():
+                    lines.append(line)
+                lines.append("")
+            else:
+                lines.append("[No neurons loaded for this layer]")
+                lines.append("")
+        else:
+            lines.append("[Layer directory does not exist yet]")
+            lines.append("")
     
     lines.extend([
         "",

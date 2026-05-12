@@ -1226,6 +1226,18 @@ class DrewgentCLI:
         """
         # Initialize Rich console
         self.console = Console()
+
+        # Ensure MCP event loop is started early so servers have maximum
+        # time to connect before the banner / status display is rendered.
+        from tools.mcp_tool import _ensure_mcp_loop, discover_mcp_tools
+        _ensure_mcp_loop()
+        discover_mcp_tools()
+
+        # Refresh the tool schema cache so MCP tools are included in the
+        # agent's tool list from the very first turn.
+        from model_tools import get_tool_definitions
+        get_tool_definitions(enabled_toolsets=None, quiet_mode=True)
+
         self.config = CLI_CONFIG
         self.compact = compact if compact is not None else CLI_CONFIG["display"].get("compact", False)
         # tool_progress: "off", "new", "all", "verbose" (from config.yaml display section)

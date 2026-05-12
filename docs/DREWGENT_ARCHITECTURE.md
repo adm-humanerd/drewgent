@@ -1,7 +1,7 @@
 # Drewgent Agent - Architecture & Implementation Guide
 
-**Version**: 1.0  
-**Last Updated**: 2026-04-15  
+**Version**: 1.1
+**Last Updated**: 2026-05-12  
 **Maintainer**: Drewgent (Chief Agent Commander @ HUMANERD)
 
 ---
@@ -213,6 +213,34 @@ class AutoLearner:
 > Note: The old `KnowledgeBus` singleton (v1.0, 2026-04-15) is deprecated.
 > The current brain system uses the Obsidian wiki at `~/.drewgent/memories/` with
 > `AutoLearner` as the core engine.
+
+### Brain Filesystem — NeuronFS (.neuron files)
+
+The brain filesystem at `~/.drewgent/brain/Drewgent-brain/` organizes governance rules
+in a 7-layer subsumption hierarchy (P0-brainstem through P6-prefrontal). Each rule is a
+`.neuron` file containing a micro-opcode pattern with `禁` (forbidden) tokens and `vorq`
+(value-or-lookup) / `enforce` mechanisms.
+
+**Key brain files (2026-05-12 upgrade):**
+
+| File | Purpose |
+|------|---------|
+| `P0-brainstem/禁karpathy_coding_principles.neuron` | P0 enforcement of Karpathy's 4 coding principles |
+| `~/.drewgent/SOUL.md` | Primary identity — links to P0-brainstem |
+| `~/.drewgent/AGENTS.md` | Project context — links to SOUL.md and P0-brainstem |
+
+**Organic reference chain (2026-05-12):**
+```
+SOUL.md ↔ P0-brainstem ↔ AGENTS.md
+  (cross-referential brain system — all three files reference each other)
+```
+
+System prompt layers that load brain components:
+- Layer 1: `load_soul_md()` → `~/.drewgent/SOUL.md`
+- Layer 3: `brain_load()` → `~/.drewgent/brain/Drewgent-brain/` (P0-brainstem neurons)
+- Layer 7: `build_context_files_prompt()` → `~/.drewgent/AGENTS.md`
+
+See `CHANGELOG.md` for the complete upgrade history.
 
 ### Wiki Maintenance (Autonomous)
 

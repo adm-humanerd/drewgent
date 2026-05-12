@@ -123,11 +123,16 @@ class GrowthEngine:
             "errors_analyzed": 0,
         }
 
+        # 0. P2→P4 upstream: consume session workflow patterns from sessions.db
+        session_patterns = self._consume_p2_sessions(days=30)
+        results["patterns_detected"].extend(session_patterns)
+        if session_patterns:
+            self._store_patterns_in_knowledge_bus(session_patterns)
+
         # 1. Analyze error patterns
         error_results = self._analyze_error_patterns()
         results["patterns_detected"].extend(error_results["patterns"])
         results["errors_analyzed"] = error_results["count"]
-
         # 2. Analyze tool performance
         tool_results = self._analyze_tool_performance()
         results["patterns_detected"].extend(tool_results["patterns"])
@@ -154,6 +159,7 @@ class GrowthEngine:
                 "patterns_found": len(results["patterns_detected"]),
                 "suggestions": len(results["suggestions"]),
                 "errors_analyzed": results["errors_analyzed"],
+                "session_patterns": len(session_patterns),
             },
         )
 
@@ -442,6 +448,210 @@ class GrowthEngine:
                 advice_parts.append(f"Common error: {errors[0][:50]}")
 
         return " | ".join(advice_parts) if advice_parts else None
+
+    # =========================================================================
+    # P2→P4 UPSTREAM: Session Pattern Consumer
+    # =========================================================================
+
+    def _consume_p2_sessions(self, days: int = 30) -> list:
+        """
+        P2→P4 upstream: Extract workflow patterns from recent P2-hippocampus sessions.
+        Reads sessions.db messages table, finds repeating tool call sequences,
+        writes them to PATTERNS_DIR as durable pattern files.
+        """
+        import sqlite3 as _sq
+        from collections import Counter as _Counter
+        import time as _time
+
+        cutoff = _time.time() - (days * 86400)
+        patterns = []
+
+        # Active session store: ~/.drewgent/state.db (written by current Drewgent)
+        # Legacy P2-hippocampus/sessions/sessions.db is abandoned since ~Apr 25
+        _active_db = _DREW_HOME / "state.db"
+
+        try:
+            if not _active_db.exists():
+                return patterns
+
+            conn = _sq.connect(str(_active_db))
+            conn.row_factory = _sq.Row
+            cur = conn.cursor()
+
+            # Step 1: Get recent session IDs (30d lookback)
+            recent_cutoff = _time.time() - (days * 86400)
+            cur.execute("SELECT id FROM sessions WHERE ended_at >= ?", (recent_cutoff,))
+            recent_ids = [r["id"] for r in cur.fetchall()]
+            if not recent_ids:
+                conn.close()
+                return patterns
+
+            # Step 2: Get tool_calls from assistant messages in recent sessions
+            # tool_calls is JSON array stored as text on assistant rows
+            placeholders = ",".join("?" * len(recent_ids))
+            cur.execute(
+                f"""
+                SELECT session_id, tool_calls
+                FROM messages
+                WHERE role = 'assistant'
+                  AND tool_calls IS NOT NULL
+                  AND session_id IN ({placeholders})
+                ORDER BY session_id, id
+                """,
+                recent_ids,
+            )
+
+            rows = cur.fetchall()
+            conn.close()
+
+            if not rows:
+                return patterns
+
+            # Build sequences per session from tool_calls JSON
+            session_tools: dict = {}
+            for row in rows:
+                sid = row["session_id"]
+                tc_raw = row["tool_calls"]
+                if not tc_raw:
+                    continue
+                try:
+                    tc_list = json.loads(tc_raw)
+                except Exception:
+                    continue
+                if sid not in session_tools:
+                    session_tools[sid] = []
+                for tc in tc_list:
+                    if isinstance(tc, dict):
+                        fn = tc.get("function", tc.get("name", ""))
+                        if isinstance(fn, dict):
+                            fname = fn.get("name", "")
+                        elif isinstance(fn, str):
+                            fname = fn
+                        else:
+                            fname = ""
+                        if fname:
+                            session_tools[sid].append(fname)
+                    elif isinstance(tc, str):
+                        session_tools[sid].append(tc)
+
+            if not session_tools:
+                return patterns
+
+            # Extract 2-step and 3-step sequences
+            seqs_2: _Counter = _Counter()
+            seqs_3: _Counter = _Counter()
+
+            for tools in session_tools.values():
+                for i in range(len(tools) - 1):
+                    seqs_2[(tools[i], tools[i + 1])] += 1
+                for i in range(len(tools) - 2):
+                    seqs_3[(tools[i], tools[i + 1], tools[i + 2])] += 1
+
+            # 3-step sequences: threshold ≥3 (filter pure-repetition noise A→A→A)
+            for seq, count in seqs_3.items():
+                if count < 3:
+                    continue
+                if len(set(seq)) == 1:
+                    continue
+                pattern = {
+                    "type": "session_workflow_3step",
+                    "description": f"3-step workflow {seq[0]} → {seq[1]} → {seq[2]} seen {count} times ({days}d)",
+                    "severity": "info",
+                    "recommendation": "Consider automating this 3-step sequence",
+                    "affected_items": [seq[0], seq[1], seq[2]],
+                }
+                fixed_pattern = {
+                    "pattern_type": pattern["type"],
+                    "description": pattern["description"],
+                    "severity": pattern["severity"],
+                    "recommendation": pattern["recommendation"],
+                    "affected_items": pattern["affected_items"],
+                }
+                pid = detect_and_record_pattern(**fixed_pattern)
+                pattern["id"] = pid
+                patterns.append(pattern)
+
+            # 2-step sequences: threshold ≥5
+            # Note: len(set)==1 (e.g. terminal→terminal) is NOT filtered —
+            # same-tool repetition IS a real workflow pattern worth tracking.
+            for seq, count in seqs_2.items():
+                if count < 5:
+                    continue
+                pattern = {
+                    "type": "session_workflow_2step",
+                    "description": f"2-step workflow {seq[0]} → {seq[1]} seen {count} times ({days}d)",
+                    "severity": "info",
+                    "recommendation": f"Consider bundling {seq[0]} + {seq[1]} into one tool",
+                    "affected_items": [seq[0], seq[1]],
+                }
+                # Fix: detect_and_record_pattern expects pattern_type, not type
+                fixed_pattern = {
+                    "pattern_type": pattern["type"],
+                    "description": pattern["description"],
+                    "severity": pattern["severity"],
+                    "recommendation": pattern["recommendation"],
+                    "affected_items": pattern["affected_items"],
+                }
+                pid = detect_and_record_pattern(**fixed_pattern)
+                pattern["id"] = pid
+                patterns.append(pattern)
+
+        except Exception:
+            pass
+
+        return patterns
+
+    def _store_patterns_in_knowledge_bus(self, patterns: list) -> None:
+        """Store detected patterns in Knowledge Bus and as pattern files."""
+        stored = False
+
+        # 1. Try Knowledge Bus (best effort)
+        try:
+            from knowledge_bus import KnowledgeBus, Knowledge
+
+            kb = KnowledgeBus.get_instance()
+            for pattern in patterns:
+                kb.store(
+                    Knowledge(
+                        source="growth_engine",
+                        type=f"pattern_{pattern.get('type', 'unknown')}",
+                        content=f"{pattern.get('description', str(pattern))}",
+                        confidence=0.7 if pattern.get("severity") == "warning" else 0.9,
+                        tags=["growth", "pattern", pattern.get("type", "unknown")],
+                    )
+                )
+            stored = True
+        except Exception:
+            pass  # KB unavailable — fall through to file fallback
+
+        # 2. Always write patterns to PATTERNS_DIR as durable fallback
+        import hashlib
+
+        for pattern in patterns:
+            ptype = pattern.get("type", "unknown")
+            desc_raw = pattern.get("description", str(pattern))
+            slug = hashlib.md5(desc_raw.encode()).hexdigest()[:8]
+            ts = datetime.now().strftime("%Y%m%d%H%M%S")
+            filename = f"{ptype}_{slug}_{ts}.json"
+            out_path = PATTERNS_DIR / filename
+
+            try:
+                with open(out_path, "w") as f:
+                    json.dump(
+                        {
+                            "id": pattern.get("id"),
+                            "type": ptype,
+                            "description": pattern.get("description"),
+                            "severity": pattern.get("severity"),
+                            "recommendation": pattern.get("recommendation"),
+                            "affected_items": pattern.get("affected_items", []),
+                            "detected_at": datetime.now().isoformat(),
+                        },
+                        f,
+                        indent=2,
+                    )
+            except Exception:
+                pass  # Don't fail growth cycle on file write error
 
 
 # =============================================================================

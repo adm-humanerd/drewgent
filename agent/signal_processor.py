@@ -1,0 +1,1192 @@
+"""Brain Signal Processor — the discriminator layer of P-folder structure.
+
+판별 레이어(Cortical Layer 3): 신호를 받아 패턴을 인식하고,
+자기 아키텍처 모델과 비교하여 적절한 행동을 결정한다.
+
+Responsibilities:
+1. Track integration workflows (tool/skill absorption)
+2. Detect completion of multi-step operations
+3. Build and maintain meta-awareness model
+4. Emit awareness signals for other layers to act on
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import time
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+from agent.event_bus import BrainEvent, get_event_bus
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Integration Workflow State
+# ---------------------------------------------------------------------------
+
+@dataclass
+class IntegrationWorkflow:
+    """Tracks progress of a tool/skill integration workflow."""
+    workflow_id: str
+    integration_type: str  # "tool" or "skill"
+    target_name: str       # e.g., "my_new_tool"
+    detected_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    steps_completed: List[str] = field(default_factory=list)
+    files_modified: List[str] = field(default_factory=list)
+    started: bool = False
+    completed: bool = False
+    completed_at: Optional[str] = None
+    correlation_id: str = ""
+    source_file: str = ""   # e.g. "tools/super_tool.py" — the primary integration target file
+
+    def add_step(self, step: str) -> None:
+        if step not in self.steps_completed:
+            self.steps_completed.append(step)
+
+    def add_file(self, file_path: str) -> None:
+        if file_path not in self.files_modified:
+            self.files_modified.append(file_path)
+
+
+# ---------------------------------------------------------------------------
+# Architecture Model (what the agent "knows" about itself)
+# ---------------------------------------------------------------------------
+
+class ArchitectureModel:
+    """Internal model of Drewgent's architecture for self-awareness.
+
+    This model learns integration patterns from the active brain's P0 neurons
+    and applies them at runtime to guide the agent's behavior.
+    """
+
+    _instance: Optional["ArchitectureModel"] = None
+    _brain_rules_loaded: bool = False
+
+    def __init__(self):
+        self._integration_patterns: Dict[str, Dict[str, Any]] = {}
+        self._last_integration_time: Optional[str] = None
+        # Brain-sourced rules (loaded lazily from brain_manager)
+        self._tool_rule: Optional[Dict[str, Any]] = None
+        self._skill_rule: Optional[Dict[str, Any]] = None
+        self._load_brain_rules()
+
+    @classmethod
+    def get_instance(cls) -> "ArchitectureModel":
+        """Get or create singleton instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def _load_brain_rules(self) -> None:
+        """Load integration rules from the active brain's P0 neurons.
+
+        This connects the brain (P folder structure) to the signal processor,
+        so that brain neurons actively govern the agent's behavior rather than
+        sitting dormant as advisory text in the system prompt.
+        """
+        if ArchitectureModel._brain_rules_loaded:
+            return
+
+        try:
+            # Import brain_manager lazily to avoid circular imports
+            from drewgent_cli.brain_manager import (
+                get_active_brain_name,
+                scan_brain,
+            )
+
+            active_brain = get_active_brain_name()
+            if not active_brain:
+                logger.debug("No active brain — using hardcoded defaults")
+                return
+
+            brain = scan_brain(active_brain)
+            if not brain:
+                logger.debug("Could not scan brain '%s'", active_brain)
+                return
+
+            # Walk P0-brainstem layer for integration rules
+            for layer in brain.layers:
+                if layer.name != "P0-brainstem":
+                    continue
+                for neuron in layer.neurons:
+                    if neuron.name.startswith("禁tool_integration_3file"):
+                        self._tool_rule = self._parse_neuron(neuron)
+                    elif neuron.name.startswith("禁skill_integration"):
+                        self._skill_rule = self._parse_neuron(neuron)
+
+            ArchitectureModel._brain_rules_loaded = True
+            logger.debug(
+                "Brain rules loaded: tool_rule=%s, skill_rule=%s",
+                bool(self._tool_rule),
+                bool(self._skill_rule),
+            )
+        except Exception as e:
+            logger.debug("Failed to load brain rules: %s", e)
+
+    def _parse_neuron(self, neuron) -> Dict[str, Any]:
+        """Parse a neuron file into structured rule data."""
+        rule = {
+            "name": neuron.name,
+            "weight": neuron.weight,
+            "content": neuron.content,
+        }
+        # Extract INTEGRATION REQUIREMENTS from .neuron content
+        # The 禁tool_integration_3file rule has structured sections
+        content = neuron.content or ""
+        files = []
+        if "tools/" in content or "model_tools.py" in content:
+            # Parse required files from rule content
+            if "tools/" in content:
+                files.append("tools/")
+            if "model_tools.py" in content:
+                files.append("model_tools.py")
+            if "toolsets.py" in content:
+                files.append("toolsets.py")
+        rule["required_files"] = files
+        return rule
+
+    def get_tool_integration_files(self) -> List[str]:
+        """Return the canonical tool integration files.
+
+        Loaded from brain P0 neuron if available, otherwise hardcoded fallback.
+        """
+        if self._tool_rule and self._tool_rule.get("required_files"):
+            return self._tool_rule["required_files"]
+        # Fallback: hardcoded defaults
+        return ["tools/", "model_tools.py", "toolsets.py"]
+
+    def get_skill_integration_files(self) -> List[str]:
+        """Return the canonical skill integration files."""
+        if self._skill_rule and self._skill_rule.get("required_files"):
+            return self._skill_rule["required_files"]
+        return ["skills/", "agent/skill_commands.py"]
+
+    # Canonical files needed to integrate a tool (FALLBACK — use get_tool_integration_files())
+    TOOL_INTEGRATION_FILES = [
+        "tools/",
+        "model_tools.py",
+        "toolsets.py",
+    ]
+
+    # Canonical files needed to integrate a skill (FALLBACK — use get_skill_integration_files())
+    SKILL_INTEGRATION_FILES = [
+        "skills/",
+        "agent/skill_commands.py",
+    ]
+
+    # Canonical files needed to integrate a gateway platform adapter
+    GATEWAY_PLATFORM_INTEGRATION_FILES = [
+        "gateway/platforms/",
+        "gateway/run.py",
+    ]
+
+    # Canonical files needed to integrate a slash command
+    SLASH_COMMAND_INTEGRATION_FILES = [
+        "drewgent_cli/commands.py",
+        "cli.py",
+    ]
+
+    # Canonical files needed to integrate an MCP server
+    MCP_SERVER_INTEGRATION_FILES = [
+        "tools/mcp_tool.py",
+    ]
+
+    # Canonical files needed to integrate a cron job
+    CRON_JOB_INTEGRATION_FILES = [
+        "cron/jobs.py",
+        "cron/scheduler.py",
+    ]
+
+    def detect_tool_integration_progress(
+        self, files_modified: List[str]
+    ) -> Dict[str, Any]:
+        """Analyze which steps of tool integration are complete.
+
+        Uses brain-sourced rules when available, falling back to hardcoded lists.
+        """
+        required = self.get_tool_integration_files()
+        tools_files = [f for f in files_modified if "tools/" in f or f.endswith("_tool.py")]
+        model_tools_modified = "model_tools.py" in files_modified
+        toolsets_modified = "toolsets.py" in files_modified
+
+        return {
+            "step_name": "tool_integration",
+            "is_complete": bool(tools_files and model_tools_modified and toolsets_modified),
+            "missing_files": self._get_missing_tool_files(files_modified),
+            "tools_file": tools_files[0] if tools_files else None,
+            "model_tools_modified": model_tools_modified,
+            "toolsets_modified": toolsets_modified,
+            "next_hint": self._get_tool_next_hint(files_modified),
+            "rule_source": "brain" if self._tool_rule else "hardcoded",
+        }
+
+    def _get_missing_tool_files(self, files_modified: List[str]) -> List[str]:
+        missing = []
+        has_tool_file = any("tools/" in f for f in files_modified)
+        required = self.get_tool_integration_files()
+        if not has_tool_file:
+            missing.append("tools/<name>_tool.py")
+        if "model_tools.py" not in files_modified:
+            missing.append("model_tools.py (_discover_tools)")
+        if "toolsets.py" not in files_modified:
+            missing.append("toolsets.py (toolset assignment)")
+        return missing
+
+    def _get_tool_next_hint(self, files_modified: List[str]) -> Optional[str]:
+        has_tool_file = any("tools/" in f for f in files_modified)
+        if not has_tool_file:
+            return "registry.register() + _discover_tools import 필요"
+        if "model_tools.py" not in files_modified:
+            return "model_tools.py의 _discover_tools()에 import 추가 필요"
+        if "toolsets.py" not in files_modified:
+            return "toolsets.py의 _HERMES_CORE_TOOLS 또는 도메인 toolset에 추가 필요"
+        return None
+
+    def detect_skill_integration_progress(
+        self, files_modified: List[str]
+    ) -> Dict[str, Any]:
+        """Analyze which steps of skill integration are complete."""
+        skill_dir = [f for f in files_modified if "skills/" in f or "SKILL.md" in f]
+        skill_cmd_modified = "agent/skill_commands.py" in files_modified
+
+        return {
+            "step_name": "skill_integration",
+            "is_complete": bool(skill_dir and skill_cmd_modified),
+            "missing_files": self._get_missing_skill_files(files_modified),
+            "skill_dir": skill_dir[0] if skill_dir else None,
+            "skill_commands_modified": skill_cmd_modified,
+            "next_hint": self._get_skill_next_hint(files_modified),
+        }
+
+    def _get_missing_skill_files(self, files_modified: List[str]) -> List[str]:
+        missing = []
+        has_skill_dir = any("skills/" in f for f in files_modified)
+        if not has_skill_dir:
+            missing.append("skills/<name>/SKILL.md")
+        if "agent/skill_commands.py" not in files_modified:
+            missing.append("agent/skill_commands.py")
+        return missing
+
+    def _get_skill_next_hint(self, files_modified: List[str]) -> Optional[str]:
+        has_skill_dir = any("skills/" in f for f in files_modified)
+        if not has_skill_dir:
+            return "skills/<name>/SKILL.md 디렉토리 생성 필요"
+        if "agent/skill_commands.py" not in files_modified:
+            return "agent/skill_commands.py에 스킬 로딩 로직 추가 필요"
+        return None
+
+    def detect_gateway_platform_integration_progress(
+        self, files_modified: List[str]
+    ) -> Dict[str, Any]:
+        """Analyze which steps of gateway platform integration are complete."""
+        platform_file = [
+            f for f in files_modified if "gateway/platforms/" in f
+        ]
+        run_py_modified = "gateway/run.py" in files_modified
+
+        return {
+            "step_name": "gateway_platform_integration",
+            "is_complete": bool(platform_file and run_py_modified),
+            "missing_files": self._get_missing_gateway_platform_files(files_modified),
+            "platform_file": platform_file[0] if platform_file else None,
+            "run_py_modified": run_py_modified,
+            "next_hint": self._get_gateway_platform_next_hint(files_modified),
+        }
+
+    def _get_missing_gateway_platform_files(self, files_modified: List[str]) -> List[str]:
+        missing = []
+        has_platform_file = any("gateway/platforms/" in f for f in files_modified)
+        if not has_platform_file:
+            missing.append("gateway/platforms/<name>.py")
+        if "gateway/run.py" not in files_modified:
+            missing.append("gateway/run.py (PLATFORM_REGISTRY에 등록)")
+        return missing
+
+    def _get_gateway_platform_next_hint(self, files_modified: List[str]) -> Optional[str]:
+        has_platform_file = any("gateway/platforms/" in f for f in files_modified)
+        if not has_platform_file:
+            return "gateway/platforms/<name>.py 어댑터 파일 생성 필요"
+        if "gateway/run.py" not in files_modified:
+            return "gateway/run.py의 PLATFORM_REGISTRY에 새 플랫폼 등록 필요"
+        return None
+
+    def detect_slash_command_integration_progress(
+        self, files_modified: List[str]
+    ) -> Dict[str, Any]:
+        """Analyze which steps of slash command integration are complete."""
+        commands_modified = "drewgent_cli/commands.py" in files_modified
+        cli_handler = "cli.py" in files_modified
+
+        return {
+            "step_name": "slash_command_integration",
+            "is_complete": bool(commands_modified and cli_handler),
+            "missing_files": self._get_missing_slash_command_files(files_modified),
+            "commands_modified": commands_modified,
+            "cli_handler_added": cli_handler,
+            "next_hint": self._get_slash_command_next_hint(files_modified),
+        }
+
+    def _get_missing_slash_command_files(self, files_modified: List[str]) -> List[str]:
+        missing = []
+        if "drewgent_cli/commands.py" not in files_modified:
+            missing.append("drewgent_cli/commands.py (CommandDef 추가)")
+        if "cli.py" not in files_modified:
+            missing.append("cli.py (process_command에 handler 추가)")
+        return missing
+
+    def _get_slash_command_next_hint(self, files_modified: List[str]) -> Optional[str]:
+        if "drewgent_cli/commands.py" not in files_modified:
+            return "drewgent_cli/commands.py의 COMMAND_REGISTRY에 CommandDef 추가 필요"
+        if "cli.py" not in files_modified:
+            return "cli.py의 process_command()에 새 명령어 handler 추가 필요"
+        return None
+
+    def detect_mcp_server_integration_progress(
+        self, files_modified: List[str]
+    ) -> Dict[str, Any]:
+        """Analyze which steps of MCP server integration are complete."""
+        mcp_tool_modified = "tools/mcp_tool.py" in files_modified
+        handler_files = [
+            f for f in files_modified if "tools/" in f and "mcp_tool" not in f
+        ]
+
+        return {
+            "step_name": "mcp_server_integration",
+            "is_complete": mcp_tool_modified,
+            "missing_files": self._get_missing_mcp_server_files(files_modified),
+            "handler_files": handler_files,
+            "mcp_tool_modified": mcp_tool_modified,
+            "next_hint": self._get_mcp_server_next_hint(files_modified),
+        }
+
+    def _get_missing_mcp_server_files(self, files_modified: List[str]) -> List[str]:
+        missing = []
+        if "tools/mcp_tool.py" not in files_modified:
+            missing.append("tools/mcp_tool.py (mcp_servers[]에 서버 추가)")
+        return missing
+
+    def _get_mcp_server_next_hint(self, files_modified: List[str]) -> Optional[str]:
+        if "tools/mcp_tool.py" not in files_modified:
+            return "tools/mcp_tool.py의 mcp_servers[]에 새 서버 설정 추가 필요"
+        return None
+
+    def detect_cron_job_integration_progress(
+        self, files_modified: List[str]
+    ) -> Dict[str, Any]:
+        """Analyze which steps of cron job integration are complete."""
+        jobs_modified = "cron/jobs.py" in files_modified
+        scheduler_modified = "cron/scheduler.py" in files_modified
+
+        return {
+            "step_name": "cron_job_integration",
+            "is_complete": bool(jobs_modified and scheduler_modified),
+            "missing_files": self._get_missing_cron_job_files(files_modified),
+            "jobs_modified": jobs_modified,
+            "scheduler_modified": scheduler_modified,
+            "next_hint": self._get_cron_job_next_hint(files_modified),
+        }
+
+    def _get_missing_cron_job_files(self, files_modified: List[str]) -> List[str]:
+        missing = []
+        if "cron/jobs.py" not in files_modified:
+            missing.append("cron/jobs.py (job 함수 정의)")
+        if "cron/scheduler.py" not in files_modified:
+            missing.append("cron/scheduler.py (job 등록)")
+        return missing
+
+    def _get_cron_job_next_hint(self, files_modified: List[str]) -> Optional[str]:
+        if "cron/jobs.py" not in files_modified:
+            return "cron/jobs.py에 job 함수 정의 필요"
+        if "cron/scheduler.py" not in files_modified:
+            return "cron/scheduler.py에 job 등록 필요"
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Signal Processor (Discriminator Layer)
+# ---------------------------------------------------------------------------
+
+class SignalProcessor:
+    """Processes brain signals and determines actions.
+
+    Subscribes to brain signal patterns and:
+    1. Tracks integration workflows
+    2. Detects completion/milestones
+    3. Emits awareness signals for other layers
+    """
+
+    def __init__(self):
+        self._bus = get_event_bus()
+        self._arch_model = ArchitectureModel()
+        self._active_workflows: Dict[str, IntegrationWorkflow] = {}
+        self._workflow_history: List[IntegrationWorkflow] = []
+        self._correlation_workflow_map: Dict[str, str] = {}
+
+        # Subscribe to relevant signals
+        self._setup_subscriptions()
+
+        logger.info("SignalProcessor initialized")
+
+    def _setup_subscriptions(self) -> None:
+        """Subscribe to all relevant brain signals."""
+        # Tool integration signals
+        self._bus.subscribe("tool.integration.start", self._on_integration_start)
+        self._bus.subscribe("tool.integration.detected", self._on_tool_detected)
+        self._bus.subscribe("tool.start", self._on_tool_start)
+        self._bus.subscribe("tool.complete", self._on_tool_complete)
+
+        # Skill integration signals
+        self._bus.subscribe("skill.integration.start", self._on_integration_start)
+        self._bus.subscribe("skill.integration.detected", self._on_skill_detected)
+
+        # Gateway platform integration signals
+        self._bus.subscribe("gateway_platform.integration.start", self._on_integration_start)
+        self._bus.subscribe("gateway_platform.integration.detected", self._on_gateway_platform_detected)
+
+        # Slash command integration signals
+        self._bus.subscribe("slash_command.integration.start", self._on_integration_start)
+        self._bus.subscribe("slash_command.integration.detected", self._on_slash_command_detected)
+
+        # MCP server integration signals
+        self._bus.subscribe("mcp_server.integration.start", self._on_integration_start)
+        self._bus.subscribe("mcp_server.integration.detected", self._on_mcp_server_detected)
+
+        # Cron job integration signals
+        self._bus.subscribe("cron_job.integration.start", self._on_integration_start)
+        self._bus.subscribe("cron_job.integration.detected", self._on_cron_job_detected)
+
+        # Agent activity signals
+        self._bus.subscribe("agent.modifying", self._on_agent_modifying)
+        self._bus.subscribe("user.prompt", self._on_user_prompt)
+
+        # Session signals
+        self._bus.subscribe("session.end", self._on_session_end)
+
+        # Tool registry loaded
+        self._bus.subscribe("tool.start", self._on_tool_registry_loaded)
+
+    # -------------------------------------------------------------------------
+    # Signal Handlers
+    # -------------------------------------------------------------------------
+
+    def _on_integration_start(self, event: BrainEvent) -> None:
+        """Handle integration.start signal — user wants to add something.
+
+        Handles: tool, skill, gateway_platform, slash_command, mcp_server, cron_job
+
+        IMPORTANT: This only creates a NEW workflow if one doesn't already exist for
+        this session. If a guidance workflow ('를') already exists, this is a NOOP.
+        This prevents spurious workflows from being created when the user asks
+        guidance questions during an ongoing integration.
+        """
+        payload = event.payload
+        msg = payload.get("message", "")
+        session_id = payload.get("session_id", "")
+        signal_type = event.event_type  # e.g., "tool.integration.start"
+
+        # Determine integration type from signal type
+        int_type = self._get_integration_type_from_signal(signal_type, msg)
+
+        # Guard: If an active workflow already exists for this session (via session_id
+        # correlation), do NOT create a new one. This catches the "guidance trap" where
+        # a spurious workflow was created for a guidance request like "도구를 추가하려면 어떻게 해야 해?"
+        # — we must NOT let it pollute the session's workflow state.
+        # IMPORTANT: The workflow_id must ALSO be in active_workflows. The correlation
+        # map may contain stale entries for workflows that have completed and been removed.
+        sid_workflow_id = self._correlation_workflow_map.get(session_id)
+        if sid_workflow_id and sid_workflow_id in self._active_workflows:
+            existing = self._active_workflows[sid_workflow_id]
+            if not existing.completed:
+                logger.debug(
+                    f"[SignalProcessor] Ignoring integration.start for session {session_id}: "
+                    f"workflow '{existing.target_name}' already active (likely from guidance request)"
+                )
+                return
+
+        target = self._extract_target_name_from_signal(signal_type, msg)
+
+        # Guard: If no specific target name was extracted, this is a generic guidance
+        # question ("how do I add a tool"), not a real integration request.
+        # Do NOT create a workflow for it.
+        if not target:
+            logger.debug(
+                f"[SignalProcessor] Ignoring integration.start: no target name extracted "
+                f"(guidance request detected for message: {msg[:50]!r})"
+            )
+            return
+
+        # Derive the primary integration file (source file) from target name + type
+        source_file = self._derive_source_file(int_type, target or f"new_{int_type}")
+
+        workflow = IntegrationWorkflow(
+            workflow_id=f"{int_type}_integration_{uuid.uuid4().hex[:12]}",
+            integration_type=int_type,
+            target_name=target or f"new_{int_type}",
+            correlation_id=event.correlation_id,
+            source_file=source_file,
+        )
+        workflow.started = True
+        self._active_workflows[workflow.workflow_id] = workflow
+        self._correlation_workflow_map[event.correlation_id] = workflow.workflow_id
+
+        if session_id:
+            self._correlation_workflow_map[session_id] = workflow.workflow_id
+
+        # Also map by source_file for cross-event correlation
+        self._correlation_workflow_map[source_file] = workflow.workflow_id
+
+        self._bus.emit(
+            "brain.awareness.integration_started",
+            payload={
+                "workflow_id": workflow.workflow_id,
+                "integration_type": int_type,
+                "target_name": workflow.target_name,
+                "session_id": session_id,
+            },
+            source="signal_processor",
+        )
+
+    def _derive_source_file(self, int_type: str, target: str) -> str:
+        """Derive the expected source file path from integration type + target name.
+
+        For tools: "super_tool" → "tools/super_tool.py" (the ACTUAL file, not _tool.py)
+        For skills: "my_skill" → "skills/my_skill/SKILL.md"
+        """
+        file_map = {
+            "tool": f"tools/{target}.py",
+            "skill": f"skills/{target}/SKILL.md",
+            "gateway_platform": f"gateway/platforms/{target}.py",
+            "slash_command": "drewgent_cli/commands.py",
+            "mcp_server": "tools/mcp_tool.py",
+            "cron_job": "cron/jobs.py",
+        }
+        return file_map.get(int_type, f"unknown/{target}")
+
+    def _get_workflow_for_source_file(self, source_file: str) -> Optional[IntegrationWorkflow]:
+        """Look up a workflow by its primary source file path."""
+        workflow_id = self._correlation_workflow_map.get(source_file)
+        if workflow_id and workflow_id in self._active_workflows:
+            return self._active_workflows[workflow_id]
+        return None
+
+    def _get_integration_type_from_signal(self, signal_type: str, msg: str) -> str:
+        """Derive integration_type from signal name or message content."""
+        # Signal type mapping (most specific first)
+        if "gateway_platform" in signal_type:
+            return "gateway_platform"
+        if "slash_command" in signal_type:
+            return "slash_command"
+        if "mcp_server" in signal_type:
+            return "mcp_server"
+        if "cron_job" in signal_type:
+            return "cron_job"
+        if "tool" in signal_type:
+            return "tool"
+        if "skill" in signal_type:
+            return "skill"
+        # Fallback: derive from message content
+        msg_lower = msg.lower()
+        if any(k in msg_lower for k in ["gateway", "어댑터", "플랫폼"]):
+            return "gateway_platform"
+        if any(k in msg_lower for k in ["command", "슬래시", "명령어"]):
+            return "slash_command"
+        if "mcp" in msg_lower:
+            return "mcp_server"
+        if any(k in msg_lower for k in ["cron", "스케줄"]):
+            return "cron_job"
+        if any(k in msg_lower for k in ["도구", "tool"]):
+            return "tool"
+        return "skill"
+
+    def _extract_target_name_from_signal(self, signal_type: str, msg: str) -> str:
+        """Extract target name from message based on integration type."""
+        import re
+        # Patterns for each type. Order matters - try more specific first.
+        patterns = {
+            "gateway_platform": [
+                r"(discord|slack|telegram|whatsapp|signal|matrix)",
+            ],
+            "slash_command": [
+                r"(?:/(\w+))",
+                r"command[:\s]*(\w+)",
+            ],
+            "mcp_server": [
+                r"mcp[:\s]*(\w+)",
+                r"server[:\s]*(\w+)",
+            ],
+            "cron_job": [
+                r"cron[:\s]*(\w+)",
+                r"job[:\s]*(\w+)",
+            ],
+            "tool": [
+                r"(\w+)\s*이라는\s*도구",       # "super_tool이라는 도구"
+                r"도구[:\s]*(\w+)",             # "도구:super_tool"
+                r"도구\s*(\w+)",                # "도구 super_tool"
+                r"tool[:\s]*(\w+)",
+            ],
+            "skill": [
+                r"(\w+)\s*이라는\s*스킬",       # "super_skill이라는 스킬"
+                r"스킬[:\s]*(\w+)",
+                r"스킬\s*(\w+)",
+                r"skill[:\s]*(\w+)",
+            ],
+        }
+        type_key = signal_type.split(".")[0] if "." in signal_type else signal_type
+        type_key = type_key.replace("_integration", "")
+
+        for pattern in patterns.get(type_key, []):
+            match = re.search(pattern, msg, re.IGNORECASE)
+            if match:
+                return match.group(1) if match.lastindex else match.group(0)
+        return ""
+
+    def _on_tool_detected(self, event: BrainEvent) -> None:
+        """Handle tool.detected — a tool file was modified."""
+        payload = event.payload
+        path = payload.get("path", "")
+        session_id = payload.get("session_id", "")
+
+        workflow = self._get_workflow_for_corr_id(event.correlation_id)
+        if workflow:
+            workflow.add_file(path)
+            workflow.add_step("tool_file_created")
+
+            # Check progress
+            progress = self._arch_model.detect_tool_integration_progress(
+                workflow.files_modified
+            )
+            self._bus.emit(
+                "brain.awareness.integration_progress",
+                payload={
+                    "workflow_id": workflow.workflow_id,
+                    "integration_type": "tool",
+                    "progress": progress,
+                    "session_id": session_id,
+                },
+                source="signal_processor",
+            )
+
+            if progress["is_complete"]:
+                self._complete_workflow(workflow)
+
+    def _on_skill_detected(self, event: BrainEvent) -> None:
+        """Handle skill.detected — a skill file was modified."""
+        payload = event.payload
+        path = payload.get("path", "")
+        session_id = payload.get("session_id", "")
+
+        workflow = self._get_workflow_for_corr_id(event.correlation_id)
+        if workflow:
+            workflow.add_file(path)
+            workflow.add_step("skill_file_created")
+
+            progress = self._arch_model.detect_skill_integration_progress(
+                workflow.files_modified
+            )
+            self._bus.emit(
+                "brain.awareness.integration_progress",
+                payload={
+                    "workflow_id": workflow.workflow_id,
+                    "integration_type": "skill",
+                    "progress": progress,
+                    "session_id": session_id,
+                },
+                source="signal_processor",
+            )
+
+            if progress["is_complete"]:
+                self._complete_workflow(workflow)
+
+    def _on_gateway_platform_detected(self, event: BrainEvent) -> None:
+        """Handle gateway_platform.detected — a platform adapter file was modified."""
+        self._handle_new_type_detected(event, "gateway_platform")
+
+    def _on_slash_command_detected(self, event: BrainEvent) -> None:
+        """Handle slash_command.detected — a command file was modified."""
+        self._handle_new_type_detected(event, "slash_command")
+
+    def _on_mcp_server_detected(self, event: BrainEvent) -> None:
+        """Handle mcp_server.detected — mcp_tool.py was modified."""
+        self._handle_new_type_detected(event, "mcp_server")
+
+    def _on_cron_job_detected(self, event: BrainEvent) -> None:
+        """Handle cron_job.detected — a cron job file was modified."""
+        self._handle_new_type_detected(event, "cron_job")
+
+    def _handle_new_type_detected(self, event: BrainEvent, int_type: str) -> None:
+        """Generic handler for new integration type detected events."""
+        payload = event.payload
+        path = payload.get("path", "")
+        session_id = payload.get("session_id", "")
+
+        workflow = self._get_workflow_for_corr_id(event.correlation_id)
+        if workflow:
+            workflow.add_file(path)
+
+            progress = self._get_progress_for_type(int_type, workflow.files_modified)
+            self._bus.emit(
+                "brain.awareness.integration_progress",
+                payload={
+                    "workflow_id": workflow.workflow_id,
+                    "integration_type": int_type,
+                    "progress": progress,
+                    "session_id": session_id,
+                },
+                source="signal_processor",
+            )
+
+            if progress.get("is_complete"):
+                self._complete_workflow(workflow)
+
+    def _get_progress_for_type(self, int_type: str, files_modified: list) -> Dict[str, Any]:
+        """Get progress dict for given integration type."""
+        detectors = {
+            "gateway_platform": self._arch_model.detect_gateway_platform_integration_progress,
+            "slash_command": self._arch_model.detect_slash_command_integration_progress,
+            "mcp_server": self._arch_model.detect_mcp_server_integration_progress,
+            "cron_job": self._arch_model.detect_cron_job_integration_progress,
+            "tool": self._arch_model.detect_tool_integration_progress,
+            "skill": self._arch_model.detect_skill_integration_progress,
+        }
+        detector = detectors.get(int_type)
+        if detector:
+            return detector(files_modified)
+        return {"is_complete": False, "step_name": int_type, "next_hint": None}
+
+    def _on_tool_start(self, event: BrainEvent) -> None:
+        """Handle tool.start — track tool execution."""
+        payload = event.payload
+        tool_name = payload.get("tool", "")
+        session_id = payload.get("session_id", "")
+
+        # Track tool execution for tool_call_count
+        workflow = self._get_workflow_for_corr_id(event.correlation_id)
+        if workflow and tool_name in ("write_file", "patch"):
+            pass  # Already tracked in _on_agent_modifying
+
+    def _on_tool_complete(self, event: BrainEvent) -> None:
+        """Handle tool.complete — check for integration completion."""
+        payload = event.payload
+        tool_name = payload.get("tool", "")
+        success = payload.get("success", True)
+        session_id = payload.get("session_id", "")
+
+        workflow = self._get_workflow_for_corr_id(event.correlation_id)
+        if not workflow:
+            return
+
+        if tool_name in ("write_file", "patch"):
+            # Get the path from the workflow
+            pass  # Files are tracked via agent.modifying
+
+    def _on_agent_modifying(self, event: BrainEvent) -> None:
+        """Handle agent.modifying — track file modifications.
+
+        Workflow resolution order:
+        1. If the modified file is the source_file of an active workflow, use that workflow
+        2. If no source_file match, try correlation_id / session_id lookup
+        3. If no workflow found and file is integration-relevant, auto-create one
+        """
+        payload = event.payload
+        operation = payload.get("operation", "")
+        path = payload.get("path", "")
+        session_id = payload.get("session_id", "")
+        correlation_id = event.correlation_id or session_id
+
+        if not path:
+            return
+
+        workflow = None
+
+        # 1. Try source_file lookup — use the ACTUAL file path as the key, not a derived path.
+        # The correlation map stores actual paths like "tools/super_tool.py", so we must look up
+        # with the actual path to find the matching workflow.
+        int_type = self._get_type_from_path(path)
+        if int_type and path:
+            workflow = self._get_workflow_for_source_file(path)
+
+        # 2. Fall back to correlation_id / session_id
+        # BUT: only use session_id correlation if:
+        # - This file IS the source_file of the session workflow (path matches source_file)
+        #   OR
+        # - This file is a KNOWN supporting file for this integration type (model_tools.py,
+        #   toolsets.py for tools; skill_commands.py for skills)
+        # This prevents a guidance workflow for "를" from capturing events for "new_tool".
+        if not workflow:
+            session_workflow = self._get_workflow_for_corr_id(session_id)
+            if session_workflow:
+                if session_workflow.source_file == path:
+                    # The agent is modifying the primary source file
+                    workflow = session_workflow
+                elif self._is_known_supporting_file(path, session_workflow.integration_type):
+                    # The agent is modifying a supporting file for this workflow
+                    workflow = session_workflow
+                # else: unrelated file — let it fall through to auto-create
+
+        # 3. Auto-create if this is an integration file with no matching workflow
+        if not workflow and int_type:
+            # Derive source_file from target name for new workflows
+            target_name = self._extract_name_from_path(path)
+            source_file = self._derive_source_file(int_type, target_name)
+            workflow = IntegrationWorkflow(
+                workflow_id=f"{int_type}_integration_{uuid.uuid4().hex[:12]}",
+                integration_type=int_type,
+                target_name=target_name,
+                correlation_id=correlation_id,
+                source_file=source_file,
+            )
+            workflow.started = True
+            self._active_workflows[workflow.workflow_id] = workflow
+            self._correlation_workflow_map[correlation_id] = workflow.workflow_id
+            if session_id:
+                self._correlation_workflow_map[session_id] = workflow.workflow_id
+            if source_file:
+                self._correlation_workflow_map[source_file] = workflow.workflow_id
+
+        if workflow:
+            workflow.add_file(path)
+
+            progress = self._get_progress_for_type(workflow.integration_type, workflow.files_modified)
+
+            # Emit progress update
+            self._bus.emit(
+                "brain.awareness.integration_progress",
+                payload={
+                    "workflow_id": workflow.workflow_id,
+                    "integration_type": workflow.integration_type,
+                    "progress": progress,
+                    "files_modified": workflow.files_modified,
+                    "session_id": session_id,
+                },
+                source="signal_processor",
+            )
+
+            if progress["is_complete"]:
+                self._complete_workflow(workflow)
+
+    def _on_user_prompt(self, event: BrainEvent) -> None:
+        """Handle user.prompt — detect integration intent patterns."""
+        payload = event.payload
+        msg = payload.get("message", "")
+        session_id = payload.get("session_id", "")
+
+        # Check if user is asking for integration guidance
+        guidance_patterns = [
+            (r"어떻게\s*(해야\s*|하면\s*)?추가", "how to add"),
+            (r"어디에\s*넣", "where to put"),
+            (r"어떻게\s*연결", "how to connect"),
+            (r"how\s*to\s*add", "how to add"),
+            (r"where\s*to\s*put", "where to put"),
+            (r"how\s*do\s*I\s*integrate", "how to integrate"),
+            (r"도구\s*추가\s*방법", "tool add method"),
+            (r"스킬\s*추가\s*방법", "skill add method"),
+            (r"추가하(?:려면|려면)\s*어떻게", "how to add"),
+        ]
+
+        for pattern, guidance_type in guidance_patterns:
+            if re.search(pattern, msg, re.IGNORECASE):
+                self._bus.emit(
+                    "brain.awareness.guidance_requested",
+                    payload={
+                        "message": msg[:200],
+                        "session_id": session_id,
+                        "pattern_matched": pattern,
+                        "guidance_type": guidance_type,
+                    },
+                    source="signal_processor",
+                )
+                break
+
+    def _on_tool_registry_loaded(self, event: BrainEvent) -> None:
+        """Handle tool_registry_loaded — emit initial awareness."""
+        payload = event.payload
+        tool_count = payload.get("tool_count", 0)
+        tools = payload.get("tools", [])
+        session_id = payload.get("session_id", "")
+
+        self._bus.emit(
+            "brain.awareness.initialized",
+            payload={
+                "tool_count": tool_count,
+                "tools": tools,
+                "session_id": session_id,
+            },
+            source="signal_processor",
+        )
+
+    def _on_session_end(self, event: BrainEvent) -> None:
+        """Handle session.end — archive active workflows."""
+        payload = event.payload
+        session_id = payload.get("session_id", "")
+
+        # Archive any incomplete workflows for next session
+        incomplete = [
+            w for w in self._active_workflows.values()
+            if not w.completed
+        ]
+        if incomplete:
+            self._workflow_history.extend(incomplete)
+
+    def _is_known_supporting_file(self, path: str, int_type: str) -> bool:
+        """Check if a file path is a known supporting file for the given integration type.
+
+        For tools: model_tools.py, toolsets.py are supporting files.
+        For skills: agent/skill_commands.py is a supporting file.
+        """
+        if int_type == "tool":
+            return path in ("model_tools.py", "toolsets.py")
+        if int_type == "skill":
+            return path == "agent/skill_commands.py"
+        if int_type == "gateway_platform":
+            return path == "gateway/run.py"
+        if int_type == "slash_command":
+            return path in ("drewgent_cli/commands.py", "cli.py")
+        if int_type == "mcp_server":
+            return path == "tools/mcp_tool.py"
+        if int_type == "cron_job":
+            return path in ("cron/jobs.py", "cron/scheduler.py")
+        return False
+
+    # -------------------------------------------------------------------------
+    # Utility Methods
+    # -------------------------------------------------------------------------
+
+    def _get_workflow_for_corr_id(self, corr_id: str) -> Optional[IntegrationWorkflow]:
+        """Get workflow by correlation ID.
+
+        IMPORTANT: Only returns workflows that are still in _active_workflows.
+        Stale entries (from completed workflows) are ignored.
+        """
+        workflow_id = self._correlation_workflow_map.get(corr_id)
+        if workflow_id and workflow_id in self._active_workflows:
+            return self._active_workflows[workflow_id]
+        return None
+
+    def _get_workflow_for_source_file(self, source_file: str) -> Optional[IntegrationWorkflow]:
+        """Look up a workflow by its primary source file path.
+
+        IMPORTANT: Only returns workflows that are still in _active_workflows.
+        Stale entries (from completed workflows) are ignored.
+        """
+        workflow_id = self._correlation_workflow_map.get(source_file)
+        if workflow_id and workflow_id in self._active_workflows:
+            return self._active_workflows[workflow_id]
+        return None
+
+    def _get_type_from_path(self, path: str) -> Optional[str]:
+        """Determine integration type from file path."""
+        if not path:
+            return None
+
+        # Gateway platform
+        if "gateway/platforms/" in path:
+            return "gateway_platform"
+        # Slash command
+        if "drewgent_cli/commands.py" in path:
+            return "slash_command"
+        if "cli.py" in path and "drewgent_cli" not in path:
+            return "slash_command"
+        # MCP server
+        if "tools/mcp_tool.py" in path:
+            return "mcp_server"
+        # Cron job
+        if "cron/jobs.py" in path:
+            return "cron_job"
+        if "cron/scheduler.py" in path:
+            return "cron_job"
+        # Skill
+        if "skills/" in path:
+            return "skill"
+        # Tool
+        if "tools/" in path:
+            return "tool"
+
+        return None
+
+    def _looks_like_integration_file(self, path: str) -> bool:
+        """Check if a file path looks like a tool/skill integration file."""
+        return self._get_type_from_path(path) is not None
+
+    def _extract_target_name(self, msg: str, keywords: List[str]) -> Optional[str]:
+        """Extract target tool/skill name from user message."""
+        # Handle Korean "N이라는/를/이" patterns
+        korean_patterns = [
+            (r"(\w+)\s*이(?:라는|을|가|를)\s*(?:도구|스킬|tool|skill)", 1),  # "super_tool이라는 도구" → "super_tool"
+            (r"(?:도구|스킬|tool|skill)\s*(\w+)", 1),  # "도구 super_tool" → "super_tool"
+        ]
+        for pattern, group_idx in korean_patterns:
+            match = re.search(pattern, msg, re.IGNORECASE)
+            if match:
+                name = match.group(group_idx)
+                # Strip Korean trailing particles
+                name = re.sub(r"(?:이라는|을|가|를|이|를)\s*$", "", name)
+                if name:
+                    return name
+
+        # Handle English patterns - look for tool NAME followed by tool/skill keyword
+        # e.g. "super_tool 이라는 도구" or "add super_tool tool"
+        english_match = re.search(r"(\w+)\s*(?:이라는|을|라는)\s*(?:도구|스킬|tool|skill)", msg, re.IGNORECASE)
+        if english_match:
+            return english_match.group(1)
+
+        # Fallback: keyword followed by word
+        for kw in keywords:
+            pattern = rf"{kw}\s+(\w+)"
+            match = re.search(pattern, msg, re.IGNORECASE)
+            if match:
+                name = match.group(1)
+                # Remove trailing Korean particles
+                name = re.sub(r'(?:이라는|을|가|를|이)\s*$', '', name)
+                if name and name not in ('추가', 'add', '생성', 'create'):
+                    return name
+
+        return None
+
+    def _extract_name_from_path(self, path: str) -> str:
+        """Extract integration target name from file path.
+
+        For 'tools/new_tool.py' → 'new_tool'
+        For 'gateway/platforms/discord.py' → 'discord'
+        For 'skills/my_skill/SKILL.md' → 'my_skill'
+        """
+        import os
+        name = os.path.basename(path)          # e.g. "new_tool.py"
+        name = os.path.splitext(name)[0]        # e.g. "new_tool"
+        return name or "unknown"
+
+    def _complete_workflow(self, workflow: IntegrationWorkflow) -> None:
+        """Mark workflow as complete and emit awareness signal."""
+        workflow.completed = True
+        workflow.completed_at = datetime.now().isoformat()
+
+        # CRITICAL: Clean up all correlation map entries for this workflow.
+        # The session_id correlation key must be cleared so it doesn't block
+        # future workflow lookups in the same session (e.g., starting a new
+        # integration after completing the previous one).
+        stale_keys = [
+            key for key, wid in self._correlation_workflow_map.items()
+            if wid == workflow.workflow_id
+        ]
+        for key in stale_keys:
+            del self._correlation_workflow_map[key]
+
+        # Emit completion signal
+        self._bus.emit(
+            "brain.awareness.integration_complete",
+            payload={
+                "workflow_id": workflow.workflow_id,
+                "integration_type": workflow.integration_type,
+                "target_name": workflow.target_name,
+                "files_modified": workflow.files_modified,
+                "steps_completed": workflow.steps_completed,
+                "duration_seconds": (
+                    datetime.fromisoformat(workflow.completed_at) -
+                    datetime.fromisoformat(workflow.detected_at)
+                ).total_seconds(),
+            },
+            source="signal_processor",
+        )
+
+        # Archive workflow
+        self._workflow_history.append(workflow)
+        if workflow.workflow_id in self._active_workflows:
+            del self._active_workflows[workflow.workflow_id]
+
+        logger.info(
+            f"Integration complete: {workflow.integration_type} '{workflow.target_name}' "
+            f"via {workflow.files_modified}"
+        )
+
+    # -------------------------------------------------------------------------
+    # Public API
+    # -------------------------------------------------------------------------
+
+    def get_active_workflows(self) -> List[IntegrationWorkflow]:
+        """Get all active integration workflows."""
+        return list(self._active_workflows.values())
+
+    def get_workflow_history(self) -> List[IntegrationWorkflow]:
+        """Get archived workflow history."""
+        return list(self._workflow_history)
+
+    def get_architecture_model(self) -> ArchitectureModel:
+        """Get the architecture awareness model."""
+        return self._arch_model
+
+    def restore_workflows(self, session_db, session_id: str) -> None:
+        """Restore active workflows from session DB on agent restart."""
+        import json
+        if not session_db:
+            return
+        try:
+            raw_workflows = session_db.load_integration_workflows(session_id)
+            for wdata in raw_workflows:
+                workflow = IntegrationWorkflow(
+                    workflow_id=wdata["workflow_id"],
+                    integration_type=wdata["integration_type"],
+                    target_name=wdata["target_name"],
+                    files_modified=wdata.get("files_modified", []),
+                    steps_completed=wdata.get("steps_completed", []),
+                    started=wdata.get("started", False),
+                    completed=wdata.get("completed", False),
+                    correlation_id=wdata.get("correlation_id") or "",
+                )
+                workflow.completed_at = wdata.get("completed_at")
+                self._active_workflows[workflow.workflow_id] = workflow
+                if workflow.correlation_id:
+                    self._correlation_workflow_map[workflow.correlation_id] = workflow.workflow_id
+        except Exception:
+            pass
+
+    def persist_active_workflows(self, session_db, session_id: str) -> None:
+        """Save all active workflows to session DB (call on session end)."""
+        import json
+        if not session_db or not session_id:
+            return
+        try:
+            for workflow in self._active_workflows.values():
+                workflow_data = {
+                    "workflow_id": workflow.workflow_id,
+                    "integration_type": workflow.integration_type,
+                    "target_name": workflow.target_name,
+                    "files_modified": workflow.files_modified,
+                    "steps_completed": workflow.steps_completed,
+                    "started": workflow.started,
+                    "completed": workflow.completed,
+                    "completed_at": workflow.completed_at,
+                    "correlation_id": workflow.correlation_id,
+                    "detected_at": workflow.detected_at,
+                }
+                session_db.save_integration_workflow(
+                    session_id, json.dumps(workflow_data)
+                )
+            # Archive completed workflows (don't keep them active across restarts)
+            for w in self._workflow_history:
+                if w.completed:
+                    try:
+                        session_db.archive_completed_workflow(w.workflow_id)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Global singleton
+# ---------------------------------------------------------------------------
+
+_signal_processor: Optional[SignalProcessor] = None
+
+
+def get_signal_processor() -> SignalProcessor:
+    """Get the global SignalProcessor singleton."""
+    global _signal_processor
+    if _signal_processor is None:
+        _signal_processor = SignalProcessor()
+    return _signal_processor

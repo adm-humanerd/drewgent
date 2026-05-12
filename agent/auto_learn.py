@@ -15,6 +15,7 @@ Output is in Karpathy's LLM Wiki / Obsidian-compatible Markdown format:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -23,7 +24,7 @@ import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Set, List, Tuple, Optional
+from typing import Set, List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,13 @@ INSIGHT_TAGS = {
     "tool": ["environment", "tool"],
     "project": ["environment", "project"],
 }
+
+# =============================================================================
+# SESSION WORKFLOW PATTERNS (P4-Cortex integration)
+# =============================================================================
+
+# Path to where session workflow JSON files are stored
+_P4_CORTEX_PATTERNS_DIR = Path.home() / ".drewgent" / "P4-cortex" / "growth" / "patterns"
 
 
 # ---------------------------------------------------------------------------
@@ -1282,6 +1290,76 @@ class AutoLearner:
                 pass
 
         return saved if sum(saved.values()) > 0 else None
+
+    # -----------------------------------------------------------------------
+    # P4-Cortex: Session Workflow Pattern Recording (per-turn)
+    # -----------------------------------------------------------------------
+
+    def record_workflow_pattern(
+        self,
+        tool_sequence: list[str],
+        task_type: str = "unknown",
+        turn_number: int = 0,
+        outcome: str = "success",
+        session_id: str = "",
+    ) -> bool:
+        """Record a tool sequence as a workflow pattern for P4-cortex growth.
+
+        Saves a JSON file to ~/.drewgent/P4-cortex/growth/patterns/ that is
+        later consumed by GrowthEngine to detect recurring workflows.
+
+        Args:
+            tool_sequence: List of tool names called in this turn
+            task_type: Classification of the task (e.g., "code_edit", "research")
+            turn_number: Which turn this was in the session
+            outcome: "success" or "failure"
+            session_id: Optional session identifier for linking
+
+        Returns:
+            True if pattern was saved, False otherwise
+        """
+        if not tool_sequence or len(tool_sequence) < 2:
+            return False
+
+        # Ensure patterns directory exists
+        _P4_CORTEX_PATTERNS_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Build a hash for deduplication and filename
+        seq_str = "_".join(tool_sequence)
+        seq_hash = hashlib.md5(seq_str.encode()).hexdigest[:8]
+        import time as _time
+
+        timestamp = _time.strftime("%Y%m%d%H%M%S")
+        filename = f"turn_workflow_{seq_hash}_{timestamp}.json"
+        filepath = _P4_CORTEX_PATTERNS_DIR / filename
+
+        pattern_data = {
+            "id": f"{seq_hash}-{timestamp}",
+            "type": "turn_workflow",
+            "description": f"Turn workflow: {' → '.join(tool_sequence)}",
+            "severity": "info",
+            "recommendation": f"Tool sequence used for {task_type} task",
+            "affected_items": tool_sequence,
+            "task_type": task_type,
+            "turn_number": turn_number,
+            "outcome": outcome,
+            "session_id": session_id,
+            "detected_at": _time.strftime("%Y-%m-%dT%H:%M:%S.%f"),
+        }
+
+        try:
+            filepath.write_text(json.dumps(pattern_data, indent=2), encoding="utf-8")
+            logger.debug(
+                "Recorded workflow pattern: %s → %s (%s turn %d)",
+                seq_str[:40],
+                outcome,
+                task_type,
+                turn_number,
+            )
+            return True
+        except Exception as e:
+            logger.debug("Failed to record workflow pattern: %s", e)
+            return False
 
     def run_maintenance(self, dry_run: bool = False) -> dict:
         """Run autonomous wiki maintenance: retire stale, dedup, detect gaps.

@@ -444,8 +444,104 @@ automatically scope to the active profile.
 
 6. **Profile operations are HOME-anchored, not HERMES_HOME-anchored** — `_get_profiles_root()`
    returns `Path.home() / ".hermes" / "profiles"`, NOT `get_drewgent_home() / "profiles"`.
-   This is intentional — it lets `drewgent` -p coder profile list` see all profiles regardless
-   of which one is active.
+This is intentional — it lets `drewgent` -p coder profile list` see all profiles regardless
+of which one is active.
+
+---
+
+## Brain Signal System
+
+Self-awareness architecture for tool/skill integration. The agent tracks its own state during integration workflows and receives proactive hints about missing steps.
+
+### Architecture (3 Layers)
+
+```
+user_prompt → SignalEmitter → event_bus → SignalProcessor
+                                          ↓
+                                    IntegrationWorkflow
+                                          ↓
+                                    ArchitectureModel
+                                          ↓
+                                  AwarenessReporter → hint injection
+```
+
+| Layer | File | Role |
+|-------|------|------|
+| 감각계 | `agent/brain_signals.py` (351 lines) | SignalEmitter — detects patterns, emits events |
+| 판별 레이어 | `agent/signal_processor.py` (650 lines) | IntegrationWorkflow tracking + correlation mapping |
+| 행동 레이어 | `agent/awareness_reporter.py` (295 lines) | Progress hint generation + guidance |
+| Event bus | `agent/event_bus.py` | Pub/sub singleton connecting all layers |
+
+### Signal Types
+
+```
+user.prompt                  — user message received
+tool.start                   — tool call started
+tool.complete                — tool call finished
+agent.modifying              — file written/patched
+tool.integration.start       — tool integration intent detected
+tool.integration.detected    — tool file modification detected
+skill.integration.start      — skill integration intent detected
+skill.integration.detected  — skill file modification detected
+brain.awareness.*            — awareness layer signals (emitted by processor)
+brain.report.hint            — hint delivered to agent
+session.end                  — session ending
+```
+
+### Integration Workflow (Tool Example)
+
+When user asks to add a tool:
+
+1. **SignalEmitter.user_prompt()** — detects intent, emits `tool.integration.start`
+2. **SignalProcessor._on_integration_start()** — creates `IntegrationWorkflow` with workflow_id
+3. **AwarenessReporter._on_integration_started()** — delivers initial guidance hint
+4. **Agent modifies `tools/new_tool.py`** — `agent_modifying` event → processor tracks file
+5. **SignalProcessor._on_agent_modifying()** — calls `arch_model.detect_tool_integration_progress()`
+6. **AwarenessReporter._on_integration_progress()** — emits "다음: model_tools.py" hint
+7. Hint is **injected into user message** at API call time (ephemeral, not persisted)
+8. Agent modifies `model_tools.py` → progress hint updates to "다음: toolsets.py"
+9. Agent modifies `toolsets.py` → `is_complete=True` → completion event
+10. **Workflow moves to history** — completion celebration emitted
+
+### Persistence
+
+Active workflows are saved to `sessionDB` (`integration_workflows` table, v8 schema) on `shutdown_memory_provider()` and restored on agent init. Enables mid-session interruption recovery.
+
+```python
+# Save: shutdown_memory_provider() → persist_active_workflows(session_db, session_id)
+# Restore: __init__() → get_signal_processor().restore_workflows(session_db, session_id)
+```
+
+### Hint Injection
+
+In `run_agent.py` main loop (per-turn API call preparation):
+- At `current_turn_user_idx`, checks `get_signal_processor().get_active_workflows()`
+- For each active workflow, calls `ArchitectureModel.detect_*_integration_progress()`
+- Appends `next_hint` to user message content as ephemeral injection (never persisted)
+
+### run_agent.py Call Sites
+
+| Location | Signal | Trigger |
+|----------|--------|---------|
+| `__init__` (~line 1196) | `tool_start("tool_registry_loaded")` | agent init |
+| `__init__` (~line 1203) | `restore_workflows()` | agent init |
+| `run_conversation` (~line 8242) | `user_prompt()` | user message received |
+| sequential tool path | `tool_start`, `tool_complete` | each tool call |
+| sequential tool path | `agent_modifying` | after each file-modifying tool result |
+| `shutdown_memory_provider` (~line 3021) | `persist_active_workflows()` | session end |
+| `shutdown_memory_provider` (~line 3031) | `session_end()` | session end |
+
+### ArchitectureModel Reference
+
+**Tool integration** — 3 files must be modified:
+```python
+TOOL_INTEGRATION_FILES = ["tools/", "model_tools.py", "toolsets.py"]
+```
+
+**Skill integration** — 2 steps:
+```python
+SKILL_INTEGRATION_FILES = ["skills/", "agent/skill_commands.py"]
+```
 
 ## Known Pitfalls
 

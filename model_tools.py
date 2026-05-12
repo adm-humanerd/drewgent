@@ -170,7 +170,10 @@ def _discover_tools():
         # "tools.honcho_tools",  # Removed — Honcho is now a memory provider plugin
         "tools.homeassistant_tool",
         "tools.brain_tool",
-        
+
+        # Test tool
+        "tools.super_tool",
+
         # Orchestrator tool (external)
         "orchestrate_tool",
     ]
