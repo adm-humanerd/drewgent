@@ -1,0 +1,83 @@
+{
+  "name": "philosophy_axes",
+  "description": "5-axis philosophy filter for Trend Harvester - based on Hugh Kim's Loopy-Era approach",
+  "version": "1.0",
+  
+  "axes": {
+    "practical": {
+      "name": "Practicality",
+      "description": "Does this trend solve real problems for中小型 model users?",
+      "weight": 1.0,
+      "questions": [
+        "Does it work on small models (MiniMax-M2.7 class)?",
+        "Does it reduce cost or increase efficiency?",
+        "Is it implementable without Claude/GPT-4 class models?",
+        "Does it help with the 3 constraints: context window, reliability, cost?"
+      ],
+      "pass_threshold": 0.6
+    },
+    "integratable": {
+      "name": "Integratability",
+      "description": "Can this trend be integrated into Drewgent's P-structure?",
+      "weight": 1.0,
+      "questions": [
+        "Does it map to P0-P6 structure?",
+        "Does it enhance existing systems (hooks, orchestrator, memory)?",
+        "Is the integration complexity reasonable?",
+        "Does it conflict with existing Drewgent architecture?"
+      ],
+      "pass_threshold": 0.5
+    },
+    "drewgent_first": {
+      "name": "Drewgent-First",
+      "description": "Does this prioritize Drewgent's specific use case (Korean,中小型 model, CLI)?",
+      "weight": 1.0,
+      "questions": [
+        "Is it relevant to Korean-language users?",
+        "Does it work in CLI environment?",
+        "Does it respect Drewgent's brain-based P-structure?",
+        "Does it help中小型 model performance?"
+      ],
+      "pass_threshold": 0.5
+    },
+    "no_model_dependency": {
+      "name": "Model-Independent",
+      "description": "Does this NOT depend on switching to larger models?",
+      "weight": 1.5,
+      "questions": [
+        "Does this require Claude/GPT-4? → REJECT",
+        "Does this suggest using smaller/faster models? → PRIORITIZE",
+        "Is this about model-agnostic techniques?",
+        "Does this help MiniMax-M2.7 perform better?"
+      ],
+      "pass_threshold": 0.7,
+      "hard_block": true
+    },
+    "safety": {
+      "name": "Safety & Trust",
+      "description": "Does this maintain or improve system safety and reliability?",
+      "weight": 1.0,
+      "questions": [
+        "Does it introduce security risks?",
+        "Does it improve reliability?",
+        "Does it enhance user trust?",
+        "Does it align with Drewgent's HARD hooks principles?"
+      ],
+      "pass_threshold": 0.6
+    }
+  },
+  
+  "scoring": {
+    "min_score": 0.0,
+    "max_score": 10.0,
+    "pass_threshold": 6.0,
+    "weight_hard_block": 3.0,
+    "axes_required": 3
+  },
+  
+  "decision_matrix": {
+    "keep": "score >= 6.0 AND no_model_dependency.score >= 0.7",
+    "discard": "score < 4.0 OR no_model_dependency.score < 0.5",
+    "review": "4.0 <= score < 6.0"
+  }
+}
