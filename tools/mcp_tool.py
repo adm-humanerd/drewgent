@@ -172,14 +172,36 @@ _SAFE_ENV_KEYS = frozenset({
 # Regex for credential patterns to strip from error messages
 _CREDENTIAL_PATTERN = re.compile(
     r"(?:"
-    r"ghp_[A-Za-z0-9_]{1,255}"           # GitHub PAT
-    r"|sk-[A-Za-z0-9_]{1,255}"           # OpenAI-style key
-    r"|Bearer\s+\S+"                      # Bearer token
-    r"|token=[^\s&,;\"']{1,255}"         # token=...
-    r"|key=[^\s&,;\"']{1,255}"           # key=...
-    r"|API_KEY=[^\s&,;\"']{1,255}"       # API_KEY=...
-    r"|password=[^\s&,;\"']{1,255}"      # password=...
-    r"|secret=[^\s&,;\"']{1,255}"        # secret=...
+    # GitHub tokens (PAT + fine-grained + OAuth)
+    r"ghp_[A-Za-z0-9_]{36,255}"           # GitHub Personal Access Token
+    r"|ghu_[A-Za-z0-9_]{36,255}"          # GitHub User Access Token
+    r"|gho_[A-Za-z0-9_]{36,255}"          # GitHub OAuth Token
+    r"|ghs_[A-Za-z0-9_]{36,255}"          # GitHub Server-to-Server OAuth Token
+    r"|ghr_[A-Za-z0-9_]{36,255}"          # GitHub Refresh Token
+    # OpenAI / AI provider keys
+    r"|sk-[A-Za-z0-9_-]{20,255}"          # OpenAI-style secret key
+    r"|sk-proj-[A-Za-z0-9_-]{20,255}"     # OpenAI project key
+    r"|sk-ant-[A-Za-z0-9_-]{20,255}"      # OpenAI Anthropic key
+    # Slack tokens
+    r"|xox[baprs]-[A-Za-z0-9-]{10,255}"  # Slack Bot/User/Webhook token
+    # AWS keys
+    r"|AKIA[A-Z0-9]{16}"                  # AWS Access Key ID
+    r"|ASIA[A-Z0-9]{16}"                  # AWS Session Token
+    # Generic auth patterns
+    r"|Bearer\s+[A-Za-z0-9_-]{10,255}"    # Bearer token
+    r"|token=[^\s&,;\"']{10,255}"         # token=...
+    r"|key=[^\s&,;\"']{10,255}"           # key=...
+    r"|API_KEY=[^\s&,;\"']{10,255}"       # API_KEY=...
+    r"|APIKEY=[^\s&,;\"']{10,255}"        # APIKEY=...
+    r"|password=[^\s&,;\"']{6,255}"       # password=... (min 6 chars)
+    r"|secret=[^\s&,;\"']{6,255}"         # secret=... (min 6 chars)
+    r"|authorization=[^\s&,;\"']{6,255}"  # authorization header value
+    # Anthropic / other AI providers
+    r"|sk-ant-[A-Za-z0-9_-]{20,}"        # Anthropic API key
+    # Google / Cloud
+    r"|AIza[A-Za-z0-9_-]{35}"            # Google API key
+    r"|[A-Za-z0-9_-]{20,}_[A-Za-z0-9_-]{30,}"  # generic api_key pattern
+    r"|[A-Za-z0-9+/]{40,}={0,2}"         # base64-encoded long strings (potential tokens)
     r")",
     re.IGNORECASE,
 )

@@ -52,18 +52,31 @@ _TASK_TYPE_PATTERNS = [
     # Creative
     (r"(생성|create|generate|write\s+\w+)", "CREATIVE", 0.70),
     (r"(문서|document|report|文章)", "CREATIVE", 0.65),
+    # P1-P6 dedicated task types (Phase 4-2)
+    (r"(기억|memory|세션\s*검색|past\s*session|session_search|이전\s*대화)", "MEMORY_QUERY", 0.80),
+    (r"(전략|strategy|계획|planning|다음\s*단계|roadmap|long[- ]term)", "STRATEGY", 0.80),
+    (r"(자가\s*개선|self[- ]?improv|성장|growth|학습|learn\s+from)", "SELF_IMPROVEMENT", 0.85),
+    (r"(자기\s*인식|자아|P5|P5-?ego|who\s+am\s+I|what\s+is\s+my)", "SELF_IMPROVEMENT", 0.80),
 ]
 
 # Layer priority per task type
+# Phase 4-1: All 7 layers represented — P0 (always first if applicable),
+#            P1-P6 (in order of subsumption hierarchy when relevant)
 _TASK_TYPE_LAYER_PRIORITY = {
-    "DANGEROUS_OPERATION": ["P0-brainstem"],
-    "TOOL_INTEGRATION":     ["P0-brainstem", "P4-cortex", "P1-limbic"],
-    "SKILL_INTEGRATION":    ["P0-brainstem", "P4-cortex", "P1-limbic"],
-    "GATEWAY_INTEGRATION":  ["P0-brainstem", "P4-cortex", "P1-limbic"],
+    # P0 always first for dangerous/high-risk
+    "DANGEROUS_OPERATION":  ["P0-brainstem"],
     "PRODUCTION_EDIT":      ["P0-brainstem", "P1-limbic", "P4-cortex"],
-    "CODING":               ["P0-brainstem", "P4-cortex", "P1-limbic", "P2-hippocampus"],
-    "RESEARCH":             ["P1-limbic", "P2-hippocampus", "P3-sensors"],
+    "TOOL_INTEGRATION":     ["P0-brainstem", "P4-cortex", "P1-limbic", "P2-hippocampus"],
+    "SKILL_INTEGRATION":    ["P0-brainstem", "P4-cortex", "P1-limbic", "P2-hippocampus"],
+    "GATEWAY_INTEGRATION":  ["P0-brainstem", "P4-cortex", "P1-limbic", "P3-sensors"],
+    "CODING":               ["P0-brainstem", "P4-cortex", "P1-limbic", "P2-hippocampus", "P5-ego", "P6-prefrontal"],
+    # P1-P6 tasks
+    "RESEARCH":             ["P1-limbic", "P2-hippocampus", "P3-sensors", "P4-cortex"],
     "CREATIVE":             ["P1-limbic", "P4-cortex", "P5-ego"],
+    "MEMORY_QUERY":         ["P2-hippocampus"],
+    "STRATEGY":             ["P6-prefrontal", "P4-cortex", "P1-limbic"],
+    "SELF_IMPROVEMENT":      ["P5-ego", "P4-cortex", "P0-brainstem"],
+    "GENERAL":              ["P1-limbic", "P2-hippocampus", "P3-sensors", "P4-cortex"],
 }
 
 
@@ -252,28 +265,79 @@ class BrainProcessor:
         layers: List[str],
         task_type: str,
     ) -> List[Dict[str, Any]]:
-        """Get rules that should fire for the given layers and task type."""
+        """Get rules that should fire for the given layers and task type.
+
+        Phase 4-3: All P1-P6 neurons are loaded into self._brain_rules
+        by load_brain(). This method filters by layer name only — the
+        layer priority is already encoded in _TASK_TYPE_LAYER_PRIORITY.
+        """
         if not self._brain_rules:
             return self._get_fallback_rules(task_type)
 
         active_rules = []
         for rule in self._brain_rules:
             if rule["layer"] in layers:
-                # Skip if the rule is not relevant to this task type
-                content = rule["content"].lower()
-                if task_type == "CODING" and "coding" not in content and "karpathy" not in content:
-                    # For coding tasks, prefer karpathy and coding-related rules
-                    if "karpathy" not in rule["name"] and "code" not in content:
-                        continue
-                active_rules.append(rule)
+                # Phase 4-3: Task-type relevance filter — skip rules
+                # whose name/content have no connection to the task type
+                name_lower = rule["name"].lower()
+                content_lower = rule["content"].lower()
+
+                # P0 rules fire regardless of task type
+                if rule["layer"] == "P0-brainstem":
+                    active_rules.append(rule)
+                    continue
+
+                # P4-cortex: filter by semantic relevance
+                if rule["layer"] == "P4-cortex":
+                    # Only include if rule name matches task type keyword
+                    task_keywords = {
+                        "MEMORY_QUERY": ["memory", "session", "hippocampus", "recall"],
+                        "STRATEGY": ["strategy", "prefrontal", "planning", "roadmap"],
+                        "SELF_IMPROVEMENT": ["self", "improv", "ego", "growth", "learn"],
+                        "RESEARCH": ["semble", "research", "search", "find"],
+                        "CREATIVE": ["creative", "limbic", "tone", "persona"],
+                        "CODING": ["karpathy", "coding", "skill", "tool"],
+                    }
+                    relevant = task_keywords.get(task_type, [])
+                    if any(kw in name_lower or kw in content_lower for kw in relevant):
+                        active_rules.append(rule)
+                    continue
+
+                # P1-limbic: tone rules fire for all interactive tasks
+                if rule["layer"] == "P1-limbic":
+                    if task_type in ("GENERAL", "CREATIVE", "RESEARCH", "CODING",
+                                     "MEMORY_QUERY", "STRATEGY", "SELF_IMPROVEMENT"):
+                        active_rules.append(rule)
+                    continue
+
+                # P2-hippocampus: memory rules fire for recall tasks
+                if rule["layer"] == "P2-hippocampus":
+                    if task_type in ("MEMORY_QUERY", "SELF_IMPROVEMENT", "GENERAL"):
+                        active_rules.append(rule)
+                    continue
+
+                # P3-sensors: tool/gateway rules fire for integration tasks
+                if rule["layer"] == "P3-sensors":
+                    if task_type in ("TOOL_INTEGRATION", "SKILL_INTEGRATION", "GATEWAY_INTEGRATION"):
+                        active_rules.append(rule)
+                    continue
+
+                # P5-ego and P6-prefrontal: always include when in layer list
+                if rule["layer"] in ("P5-ego", "P6-prefrontal"):
+                    active_rules.append(rule)
+                    continue
 
         return active_rules
 
     def _get_fallback_rules(self, task_type: str) -> List[Dict[str, Any]]:
-        """Hardcoded fallback rules when brain is not loaded."""
-        rules = []
+        """Hardcoded fallback rules when brain is not loaded.
 
-        # Always-active P0 rules
+        Phase 4-4: All P0-P6 layers have fallback rules.
+        When brain is not loaded, these ensure P1-P6 guidance still fires.
+        """
+        rules: List[Dict[str, Any]] = []
+
+        # ── P0-brainstem: always included ──────────────────────────────────
         p0_rules = [
             {
                 "layer": "P0-brainstem",
@@ -313,7 +377,77 @@ class BrainProcessor:
                 "weight": 0.95,
             })
 
-        return p0_rules
+        rules.extend(p0_rules)
+
+        # ── P1-limbic: tone/style ─────────────────────────────────────────
+        if task_type in ("GENERAL", "CREATIVE", "RESEARCH", "CODING",
+                         "MEMORY_QUERY", "STRATEGY", "SELF_IMPROVEMENT"):
+            rules.append({
+                "layer": "P1-limbic",
+                "name": "limbic-tone-direct",
+                "content": "Be direct. Say what is true, even when inconvenient. Admit uncertainty explicitly.",
+                "weight": 0.8,
+            })
+            rules.append({
+                "layer": "P1-limbic",
+                "name": "limbic-tone-korean",
+                "content": "For Korean-speaking users, respond in Korean with appropriate respect level.",
+                "weight": 0.8,
+            })
+
+        # ── P2-hippocampus: memory/recall ─────────────────────────────────
+        if task_type in ("MEMORY_QUERY", "SELF_IMPROVEMENT", "GENERAL"):
+            rules.append({
+                "layer": "P2-hippocampus",
+                "name": "hippocampus-session-search-first",
+                "content": "Search past sessions before asking the user to repeat themselves.",
+                "weight": 0.75,
+            })
+
+        # ── P3-sensors: tool routing hints ────────────────────────────────
+        if task_type in ("TOOL_INTEGRATION", "SKILL_INTEGRATION", "GATEWAY_INTEGRATION"):
+            rules.append({
+                "layer": "P3-sensors",
+                "name": "sensors-tool-routing",
+                "content": "Use skill_view() to load skills. Use search() for code exploration. Use read_file() over terminal cat.",
+                "weight": 0.7,
+            })
+
+        # ── P4-cortex: growth patterns ────────────────────────────────────
+        if task_type in ("CODING", "RESEARCH", "SELF_IMPROVEMENT"):
+            rules.append({
+                "layer": "P4-cortex",
+                "name": "cortex-semble-first",
+                "content": "For code exploration, use sembe_search before grep. For unfamiliar code, ask 'where is X' not 'grep X'.",
+                "weight": 0.7,
+            })
+            rules.append({
+                "layer": "P4-cortex",
+                "name": "cortex-skill-save",
+                "content": "After difficult tasks, offer to save as a skill. After correcting approach, patch the skill.",
+                "weight": 0.7,
+            })
+
+        # ── P5-ego: self-model — fire for all cognitive tasks ─────────────────
+        # Phase 4-4 fix: CODING also needs P5-ego (identity + self-reflection)
+        if task_type in ("SELF_IMPROVEMENT", "GENERAL", "CODING"):
+            rules.append({
+                "layer": "P5-ego",
+                "name": "ego-identity-p5",
+                "content": "I am Drewgent — Claude Code with NeuronFS-style brain. P0 overrides everything. Think before code.",
+                "weight": 0.65,
+            })
+
+        # ── P6-prefrontal: strategy ──────────────────────────────────────
+        if task_type in ("STRATEGY", "SELF_IMPROVEMENT", "CODING"):
+            rules.append({
+                "layer": "P6-prefrontal",
+                "name": "prefrontal-plan-before",
+                "content": "For multi-step tasks, state a brief plan before executing. Define success criteria.",
+                "weight": 0.65,
+            })
+
+        return rules
 
     # ── Hint Generation ───────────────────────────────────────────────────
 
@@ -348,6 +482,13 @@ class BrainProcessor:
             hints.append("Goal-Driven: define success criteria, verify each step.")
         elif task_type == "DANGEROUS_OPERATION":
             hints.append("P0-brainstem ACTIVE: verify each step before proceeding. Ask if uncertain.")
+        # P1-P6 dedicated hints (Phase 4-2)
+        elif task_type == "MEMORY_QUERY":
+            hints.append("P2-hippocampus: search past sessions before asking the user.")
+        elif task_type == "STRATEGY":
+            hints.append("P6-prefrontal: present multiple approaches, state tradeoffs clearly.")
+        elif task_type == "SELF_IMPROVEMENT":
+            hints.append("P5-ego: reflect on identity and growth. Apply patterns from past errors.")
 
         # Tool-call specific hints
         if tool_calls:

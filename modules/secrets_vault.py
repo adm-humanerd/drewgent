@@ -32,6 +32,7 @@ Usage:
 """
 
 import json
+import os
 import hashlib
 import base64
 import uuid
@@ -77,16 +78,31 @@ class SecretsVault:
     def _get_fernet(self) -> Fernet:
         """PBKDF2로 키 유도 + Fernet 대칭 암호화"""
         password = self._get_or_create_master_key()
+        salt = self._get_or_create_salt()
 
         # 키 유도
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
-            salt=b"drewgent_vault_salt",  # 실제론 랜덤 salt 사용
-            iterations=100000,
+            salt=salt,
+            iterations=480000,
         )
         key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
         return Fernet(key)
+
+    def _get_or_create_salt(self) -> bytes:
+        """Vault별 고유 salt 생성/로드 (machine-specific entropy 포함)"""
+        salt_path = self.key_path.parent / ".vault_salt"
+        if salt_path.exists():
+            salt_path.chmod(0o600)
+            return salt_path.read_bytes()
+        # 새 salt: os.random(32바이트) + machine entropy
+        machine_entropy = f"{os.getuid()}-{os.getpid()}-{self.key_path}".encode()
+        combined = secrets.token_bytes(32) + hashlib.sha256(machine_entropy).digest()
+        salt = hashlib.sha256(combined).digest()
+        salt_path.write_bytes(salt)
+        salt_path.chmod(0o600)
+        return salt
 
     def _get_or_create_master_key(self) -> str:
         """Master key 관리 (Drew만 접근 가능)"""
@@ -120,11 +136,11 @@ class SecretsVault:
         registry_path = self.vault_path.parent / "secrets_registry.json"
         if registry_path.exists():
             try:
+                registry_path.chmod(0o600)
                 with open(registry_path, "r") as f:
                     return json.load(f)
             except:
                 return {}
-        return {}
         return {}
 
     def _save_vault(self):

@@ -361,3 +361,69 @@ def emit_session_end(
     summary: str = "", message_count: int = 0, tool_count: int = 0
 ) -> None:
     get_signal_emitter().session_end(summary, message_count, tool_count)
+
+
+# ----------------------------------------------------------------------
+# Phase 3-1: Turn lifecycle & QA gate emitters (P0-brainstem hooks)
+# ----------------------------------------------------------------------
+
+
+def emit_turn_start(turn_number: int, user_message: str) -> None:
+    """Emit turn.start — fires before each turn begins.
+
+    Phase 3-1: Connects run_agent.py fusion loop → signal bus →
+    signal_processor._on_turn_start().
+    """
+    get_signal_emitter()._bus.emit(
+        "turn.start",
+        payload={"turn_number": turn_number, "user_message": user_message},
+        source="brain_signals",
+    )
+
+
+def emit_turn_end(
+    turn_number: int,
+    assistant_response: str = "",
+    tool_calls: Optional[List[Dict]] = None,
+) -> None:
+    """Emit turn.end — fires after each turn completes.
+
+    Phase 3-1: Connects run_agent.py fusion loop → signal bus →
+    signal_processor._on_turn_end().
+    """
+    get_signal_emitter()._bus.emit(
+        "turn.end",
+        payload={
+            "turn_number": turn_number,
+            "assistant_response": assistant_response,
+            "tool_calls": tool_calls or [],
+        },
+        source="brain_signals",
+    )
+
+
+def emit_qa_gate(task_id: str, phase: str, evidence_dir: str) -> None:
+    """Emit qa.gate — enforce 禁task_qa_gate contract-first QA.
+
+    Phase 3-1: Called by run_agent.py before each delivery phase
+    (contract/micro/full). signal_processor._on_qa_gate() validates
+    that the required evidence file exists.
+    """
+    get_signal_emitter()._bus.emit(
+        "qa.gate",
+        payload={"task_id": task_id, "phase": phase, "evidence_dir": evidence_dir},
+        source="brain_signals",
+    )
+
+
+def emit_agent_complete(session_id: str, message_count: int) -> None:
+    """Emit agent.complete — fires when agent session ends.
+
+    Phase 3-1: Connects run_agent.py final cleanup → signal bus →
+    signal_processor._on_agent_complete() for P0-brainstem final verification.
+    """
+    get_signal_emitter()._bus.emit(
+        "agent.complete",
+        payload={"session_id": session_id, "message_count": message_count},
+        source="brain_signals",
+    )

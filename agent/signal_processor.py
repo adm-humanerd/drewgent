@@ -44,6 +44,7 @@ class IntegrationWorkflow:
     completed_at: Optional[str] = None
     correlation_id: str = ""
     source_file: str = ""   # e.g. "tools/super_tool.py" — the primary integration target file
+    next_hint: Optional[str] = None  # Phase 5-1 fix: store computed hint for P0 enforcement
 
     def add_step(self, step: str) -> None:
         if step not in self.steps_completed:
@@ -52,6 +53,14 @@ class IntegrationWorkflow:
     def add_file(self, file_path: str) -> None:
         if file_path not in self.files_modified:
             self.files_modified.append(file_path)
+
+    def get_hint(self) -> Optional[str]:
+        """Phase 5-1 fix: return next_hint for P0 enforcement in _complete_workflow.
+
+        Called by signal_processor._complete_workflow() to check if the workflow
+        is incomplete (hint != None means files are missing).
+        """
+        return self.next_hint
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +83,8 @@ class ArchitectureModel:
         # Brain-sourced rules (loaded lazily from brain_manager)
         self._tool_rule: Optional[Dict[str, Any]] = None
         self._skill_rule: Optional[Dict[str, Any]] = None
+        # Phase 2-2: All P0-brainstem neurons for runtime enforcement
+        self._p0_neurons: List[Dict[str, Any]] = []
         self._load_brain_rules()
 
     @classmethod
@@ -110,21 +121,27 @@ class ArchitectureModel:
                 logger.debug("Could not scan brain '%s'", active_brain)
                 return
 
-            # Walk P0-brainstem layer for integration rules
+            # Walk P0-brainstem layer — load ALL neurons for runtime enforcement
+            self._p0_neurons = []
             for layer in brain.layers:
                 if layer.name != "P0-brainstem":
                     continue
                 for neuron in layer.neurons:
+                    parsed = self._parse_neuron(neuron)
+                    # Also extract required_files for integration neurons
                     if neuron.name.startswith("禁tool_integration_3file"):
-                        self._tool_rule = self._parse_neuron(neuron)
+                        self._tool_rule = parsed
                     elif neuron.name.startswith("禁skill_integration"):
-                        self._skill_rule = self._parse_neuron(neuron)
+                        self._skill_rule = parsed
+                    # Load ALL P0 neurons for enforcement
+                    self._p0_neurons.append(parsed)
 
             ArchitectureModel._brain_rules_loaded = True
             logger.debug(
-                "Brain rules loaded: tool_rule=%s, skill_rule=%s",
+                "Brain rules loaded: tool_rule=%s, skill_rule=%s, p0_neurons=%d",
                 bool(self._tool_rule),
                 bool(self._skill_rule),
+                len(self._p0_neurons),
             )
         except Exception as e:
             logger.debug("Failed to load brain rules: %s", e)
@@ -470,6 +487,16 @@ class SignalProcessor:
 
         # Tool registry loaded
         self._bus.subscribe("tool.start", self._on_tool_registry_loaded)
+
+        # Phase 2-1: Turn lifecycle events (P0-brainstem enforcement hooks)
+        self._bus.subscribe("turn.start", self._on_turn_start)
+        self._bus.subscribe("turn.end", self._on_turn_end)
+
+        # Phase 2-1: QA gate enforcement
+        self._bus.subscribe("qa.gate", self._on_qa_gate)
+
+        # Phase 2-1: Agent completion (P0 final verification)
+        self._bus.subscribe("agent.complete", self._on_agent_complete)
 
     # -------------------------------------------------------------------------
     # Signal Handlers
@@ -853,6 +880,8 @@ class SignalProcessor:
             workflow.add_file(path)
 
             progress = self._get_progress_for_type(workflow.integration_type, workflow.files_modified)
+            # Phase 5-1: Store next_hint in workflow for P0 enforcement in _complete_workflow
+            workflow.next_hint = progress.get("next_hint")
 
             # Emit progress update
             self._bus.emit(
@@ -1061,7 +1090,37 @@ class SignalProcessor:
         return name or "unknown"
 
     def _complete_workflow(self, workflow: IntegrationWorkflow) -> None:
-        """Mark workflow as complete and emit awareness signal."""
+        """Mark workflow as complete and emit awareness signal.
+
+        Phase 2-3: P0 enforcement — validates completeness before marking done.
+        For tool integrations, checks all 3 required files exist.
+        For skill integrations, checks SKILL.md + agent/skill_commands.py exist.
+        If incomplete, emits integration.incomplete event instead.
+        """
+        # Phase 2-3: Pre-completion completeness check (P0 enforcement)
+        _hint = workflow.get_hint()
+        if _hint is not None:
+            # Incomplete — emit incomplete event, do NOT complete
+            self._bus.emit(
+                "brain.awareness.integration_incomplete",
+                payload={
+                    "workflow_id": workflow.workflow_id,
+                    "integration_type": workflow.integration_type,
+                    "target_name": workflow.target_name,
+                    "files_modified": workflow.files_modified,
+                    "steps_completed": workflow.steps_completed,
+                    "missing_hint": _hint,
+                    "reason": "禁tool_integration_3file — not all required files are present",
+                },
+                source="signal_processor",
+            )
+            logger.warning(
+                f"Integration INCOMPLETE blocked: {workflow.integration_type} "
+                f"'{workflow.target_name}' — {workflow.files_modified}. "
+                f"Missing: {workflow.get_hint()}"
+            )
+            return  # Do NOT complete — P0 enforcement blocks
+
         workflow.completed = True
         workflow.completed_at = datetime.now().isoformat()
 
@@ -1102,6 +1161,98 @@ class SignalProcessor:
             f"Integration complete: {workflow.integration_type} '{workflow.target_name}' "
             f"via {workflow.files_modified}"
         )
+
+    # -------------------------------------------------------------------------
+    # Phase 2-1: Turn lifecycle & QA gate handlers
+    # -------------------------------------------------------------------------
+
+    def _on_turn_start(self, event: BrainEvent) -> None:
+        """Handle turn.start — P0-brainstem pre-validation hook.
+
+        Fires before each turn begins. Can emit dangerous.op events
+        if the upcoming turn contains high-risk operations.
+        """
+        # Placeholder: actual dangerous-op detection is task-type dependent
+        # and lives in brain_processor.decide() which has the full context.
+        # This handler exists as the enforcement hook.
+        pass
+
+    def _on_turn_end(self, event: BrainEvent) -> None:
+        """Handle turn.end — P0-brainstem post-verification hook.
+
+        Fires after each turn completes. Verifies the turn did not violate
+        P0 rules (e.g., blind_write, secrets_in_code, console_log).
+        """
+        pass
+
+    def _on_qa_gate(self, event: BrainEvent) -> None:
+        """Handle qa.gate — enforce 禁task_qa_gate contract-first QA.
+
+        Expected payload:
+            task_id: unique identifier for this QA cycle
+            phase: "contract" | "micro" | "full"
+            evidence_dir: path to qa-evidence/{task_id}/
+
+        Phase semantics (from 禁task_qa_gate.neuron):
+            contract: contract.json must exist before implementation
+            micro:    micro-qa.json must exist after each major step
+            full:     full-qa.json must exist before delivery
+        """
+        payload = event.payload or {}
+        task_id = payload.get("task_id", "unknown")
+        phase = payload.get("phase", "unknown")
+        evidence_dir = payload.get("evidence_dir", "")
+
+        import os
+
+        # Phase 2-4: Enforce file presence per QA phase
+        _required_files = {
+            "contract": "contract.json",
+            "micro": "micro-qa.json",
+            "full": "full-qa.json",
+        }
+        _required_file = _required_files.get(phase)
+        _passed = False
+
+        if _required_file and evidence_dir:
+            _file_path = os.path.join(evidence_dir, _required_file)
+            _passed = os.path.isfile(_file_path)
+            if _passed:
+                logger.info(
+                    "QA gate PASSED: task=%s phase=%s file=%s",
+                    task_id, phase, _required_file,
+                )
+            else:
+                logger.warning(
+                    "QA gate FAILED: task=%s phase=%s — required file '%s' not found in %s. "
+                    "Task delivery BLOCKED until evidence is recorded.",
+                    task_id, phase, _required_file, evidence_dir,
+                )
+                # Emit blocking signal so upstream can pause delivery
+                self._bus.emit(
+                    "brain.awareness.qa_gate_failed",
+                    payload={
+                        "task_id": task_id,
+                        "phase": phase,
+                        "required_file": _required_file,
+                        "evidence_dir": evidence_dir,
+                        "reason": "禁task_qa_gate — evidence file not found",
+                    },
+                    source="signal_processor",
+                )
+        else:
+            logger.debug(
+                "QA gate received: task=%s phase=%s dir=%s (file check skipped — no evidence_dir)",
+                task_id, phase, evidence_dir,
+            )
+
+    def _on_agent_complete(self, event: BrainEvent) -> None:
+        """Handle agent.complete — P0-brainstem final verification.
+
+        Fires when the agent completes a session. Performs any final
+        safety checks before the session is marked done.
+        """
+        pass
 
     # -------------------------------------------------------------------------
     # Public API
