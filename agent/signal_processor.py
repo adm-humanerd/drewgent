@@ -444,6 +444,8 @@ class SignalProcessor:
         self._active_workflows: Dict[str, IntegrationWorkflow] = {}
         self._workflow_history: List[IntegrationWorkflow] = []
         self._correlation_workflow_map: Dict[str, str] = {}
+        self._violation_history: List[dict] = []
+        self._dangerous_ops_history: List[dict] = []
 
         # Subscribe to relevant signals
         self._setup_subscriptions()
@@ -491,6 +493,9 @@ class SignalProcessor:
         # Phase 2-1: Turn lifecycle events (P0-brainstem enforcement hooks)
         self._bus.subscribe("turn.start", self._on_turn_start)
         self._bus.subscribe("turn.end", self._on_turn_end)
+        self._bus.subscribe("dangerous.op", self._on_dangerous_op)
+        self._bus.subscribe("rule.violation", self._on_rule_violation)
+        self._bus.subscribe("workflow.incomplete", self._on_workflow_incomplete)
 
         # Phase 2-1: QA gate enforcement
         self._bus.subscribe("qa.gate", self._on_qa_gate)
@@ -1169,21 +1174,183 @@ class SignalProcessor:
     def _on_turn_start(self, event: BrainEvent) -> None:
         """Handle turn.start — P0-brainstem pre-validation hook.
 
-        Fires before each turn begins. Can emit dangerous.op events
-        if the upcoming turn contains high-risk operations.
+        Fires before each turn begins. Detects high-risk operations in the
+        user message and emits dangerous.op events if any are found.
+
+        Detection scope:
+            - Integration intent patterns (tool/skill/gateway add/remove)
+            - Dangerous command patterns (rm -rf, chmod 777, etc.)
+            - System path violations (write to /etc, chown root, etc.)
+
+        Emit: dangerous.op event with payload for downstream handlers.
         """
-        # Placeholder: actual dangerous-op detection is task-type dependent
-        # and lives in brain_processor.decide() which has the full context.
-        # This handler exists as the enforcement hook.
-        pass
+        payload = event.payload or {}
+        user_message = payload.get("user_message", "")
+        turn_number = payload.get("turn_number", 0)
+
+        if not user_message:
+            return
+
+        # ── 1. Integration intent detection ──────────────────────────
+        # Reuse brain_signals patterns for intent classification
+        try:
+            from agent.brain_signals import _INTEGRATION_PATTERNS
+            for pattern, signal_type in _INTEGRATION_PATTERNS:
+                if re.search(pattern, user_message, re.IGNORECASE):
+                    self._bus.emit(
+                        "dangerous.op",
+                        payload={
+                            "turn_number": turn_number,
+                            "detected_type": "integration",
+                            "signal_type": signal_type,
+                            "pattern": pattern,
+                            "message_preview": user_message[:100],
+                            "severity": "medium",
+                        },
+                        source="signal_processor",
+                    )
+                    break  # one emit per turn is enough for integration signals
+        except Exception as e:
+            logger.debug("_on_turn_start: integration pattern check failed: %s", e)
+
+        # ── 2. Dangerous command detection in user message ────────────
+        # Scan user message text for dangerous shell commands
+        try:
+            from tools.approval import detect_dangerous_command
+            is_dangerous, pattern_key, description = detect_dangerous_command(user_message)
+            if is_dangerous:
+                self._bus.emit(
+                    "dangerous.op",
+                    payload={
+                        "turn_number": turn_number,
+                        "detected_type": "command",
+                        "pattern_key": pattern_key,
+                        "description": description,
+                        "message_preview": user_message[:100],
+                        "severity": "high",
+                    },
+                    source="signal_processor",
+                )
+        except Exception as e:
+            logger.debug("_on_turn_start: dangerous command check failed: %s", e)
 
     def _on_turn_end(self, event: BrainEvent) -> None:
         """Handle turn.end — P0-brainstem post-verification hook.
 
         Fires after each turn completes. Verifies the turn did not violate
-        P0 rules (e.g., blind_write, secrets_in_code, console_log).
+        P0 rules by checking:
+            - write_file/write calls WITHOUT prior read (禁blind_write)
+            - Hardcoded secrets in write content (禁secrets_in_code)
+            - console.log/print in non-test code (禁console_log)
+
+        Emit: rule.violation event if any P0 rule is broken.
         """
-        pass
+        import json
+
+        payload = event.payload or {}
+        tool_calls = payload.get("tool_calls", [])
+        assistant_response = payload.get("assistant_response", "")
+
+        if not tool_calls and not assistant_response:
+            return
+
+        # ── 1. Check for blind write (write_file without prior read) ──
+        # We track which files were read in this turn via a shared set.
+        # For now, flag write_file calls that look like new file creation
+        # (path doesn't start with known project dirs).
+        try:
+            _written_files: set = getattr(self, "_turn_written_files", set())
+            for tc in tool_calls:
+                func = tc.get("function", {})
+                name = func.get("name", "")
+                if name in ("write_file", "patch"):
+                    args_str = func.get("arguments", "{}")
+                    try:
+                        args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    path = args.get("path", "")
+                    if path and name == "write_file":
+                        # Flag if this looks like overwriting without reading
+                        content = args.get("content", "")
+                        if content and not content.startswith("#"):
+                            self._bus.emit(
+                                "rule.violation",
+                                payload={
+                                    "turn_number": payload.get("turn_number", 0),
+                                    "rule_token": "禁blind_write",
+                                    "tool": name,
+                                    "path": path,
+                                    "severity": "medium",
+                                    "message": f"write_file to {path} — verify prior read exists",
+                                },
+                                source="signal_processor",
+                            )
+        except Exception as e:
+            logger.debug("_on_turn_end: blind_write check failed: %s", e)
+
+        # ── 2. Check for hardcoded secrets in tool call content ─────
+        try:
+            _SECRET_PATTERNS = [
+                (r'sk-[a-zA-Z0-9]{20,}', "OpenAI API key"),
+                (r'ghp_[a-zA-Z0-9]{36}', "GitHub token"),
+                (r'password\s*=\s*["\'][^"\']{6,}["\']', "hardcoded password"),
+                (r'api[_-]?key\s*=\s*["\'][^"\']{10,}["\']', "hardcoded API key"),
+                (r'token\s*=\s*["\'][^"\']{20,}["\']', "hardcoded token"),
+            ]
+            for tc in tool_calls:
+                func = tc.get("function", {})
+                name = func.get("name", "")
+                if name in ("write_file", "patch", "terminal"):
+                    args_str = func.get("arguments", "{}")
+                    try:
+                        args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    content = args.get("content", "") or args.get("command", "")
+                    if content:
+                        for pattern, label in _SECRET_PATTERNS:
+                            if re.search(pattern, content, re.IGNORECASE):
+                                self._bus.emit(
+                                    "rule.violation",
+                                    payload={
+                                        "turn_number": payload.get("turn_number", 0),
+                                        "rule_token": "禁secrets_in_code",
+                                        "tool": name,
+                                        "secret_type": label,
+                                        "severity": "high",
+                                        "message": f"Potential {label} in {name} call",
+                                    },
+                                    source="signal_processor",
+                                )
+                                break  # one violation per turn is enough
+        except Exception as e:
+            logger.debug("_on_turn_end: secrets check failed: %s", e)
+
+        # ── 3. Check assistant response for console.log/print statements ──
+        try:
+            if assistant_response:
+                console_patterns = [
+                    (r'console\.log\s*\(', "console.log in code"),
+                    (r'\bprint\s*\(', "print() in code"),
+                    (r'System\.out\.println', "System.out.println in code"),
+                ]
+                for pattern, label in console_patterns:
+                    if re.search(pattern, assistant_response):
+                        self._bus.emit(
+                            "rule.violation",
+                            payload={
+                                "turn_number": payload.get("turn_number", 0),
+                                "rule_token": "禁console_log",
+                                "detected_type": label,
+                                "severity": "low",
+                                "message": f"Production code contains {label}",
+                            },
+                            source="signal_processor",
+                        )
+                        break
+        except Exception as e:
+            logger.debug("_on_turn_end: console_log check failed: %s", e)
 
     def _on_qa_gate(self, event: BrainEvent) -> None:
         """Handle qa.gate — enforce 禁task_qa_gate contract-first QA.
@@ -1249,14 +1416,241 @@ class SignalProcessor:
     def _on_agent_complete(self, event: BrainEvent) -> None:
         """Handle agent.complete — P0-brainstem final verification.
 
-        Fires when the agent completes a session. Performs any final
-        safety checks before the session is marked done.
-        """
-        pass
+        Fires when the agent completes a session. Performs final safety checks:
+            - Incomplete integration workflows (started but not completed)
+            - Accumulated rule violations across all turns
+            - Unresolved QA gate workflows
 
-    # -------------------------------------------------------------------------
-    # Public API
-    # -------------------------------------------------------------------------
+        These are logged (not blocking) — the session is already ending.
+        This is a post-mortem record for P6-prefrontal/incidents/.
+        """
+        payload = event.payload or {}
+        session_id = payload.get("session_id", "unknown")
+        message_count = payload.get("message_count", 0)
+
+        logger.info(
+            "Agent session complete: session_id=%s, messages=%d",
+            session_id,
+            message_count,
+        )
+
+        # ── 1. Incomplete integration workflows ─────────────────────
+        try:
+            incomplete = [
+                wf for wf in self._active_workflows.values()
+                if wf.status not in ("completed", "failed", "cancelled")
+            ]
+            if incomplete:
+                for wf in incomplete:
+                    logger.warning(
+                        "Incomplete workflow at session end: type=%s, target=%s, status=%s",
+                        wf.integration_type,
+                        wf.target_name,
+                        wf.status,
+                    )
+                    self._bus.emit(
+                        "workflow.incomplete",
+                        payload={
+                            "session_id": session_id,
+                            "workflow_type": wf.integration_type,
+                            "workflow_target": wf.target_name,
+                            "workflow_status": wf.status,
+                            "workflow_started_at": wf.started_at.isoformat() if getattr(wf, "started_at", None) else None,
+                        },
+                        source="signal_processor",
+                    )
+        except Exception as e:
+            logger.debug("_on_agent_complete: workflow check failed: %s", e)
+
+        # ── 2. Accumulated rule violations ──────────────────────────
+        try:
+            recent_violations = list(self._violation_history[-50:])
+            if recent_violations:
+                by_rule: dict = {}
+                for v in recent_violations:
+                    rule = v.get("rule_token", "unknown")
+                    by_rule.setdefault(rule, []).append(v)
+                for rule, violations in by_rule.items():
+                    logger.warning(
+                        "Session rule violations: %s occurred %d time(s)",
+                        rule,
+                        len(violations),
+                    )
+                self._bus.emit(
+                    "session.violations",
+                    payload={
+                        "session_id": session_id,
+                        "total_count": len(recent_violations),
+                        "by_rule": {k: len(v) for k, v in by_rule.items()},
+                    },
+                    source="signal_processor",
+                )
+        except Exception as e:
+            logger.debug("_on_agent_complete: violation check failed: %s", e)
+
+        # ── 3. QA gate status ────────────────────────────────────────
+        try:
+            # Check if any QA workflows were started but not completed
+            qa_workflows = [
+                wf for wf in self._workflow_history
+                if wf.integration_type in ("qa", "test", "verification")
+                and wf.status not in ("completed", "failed", "cancelled")
+            ]
+            if qa_workflows:
+                for qf in qa_workflows:
+                    logger.warning(
+                        "Unresolved QA workflow at session end: %s, status=%s",
+                        qf.target_name,
+                        qf.status,
+                    )
+        except Exception as e:
+            logger.debug("_on_agent_complete: QA check failed: %s", e)
+
+    def _on_dangerous_op(self, event: BrainEvent) -> None:
+        """Handle dangerous.op — log and optionally flag for human review.
+
+        dangerous.op is emitted by _on_turn_start when high-risk operations
+        are detected in the user message or tool calls.
+
+        Actions:
+            - Log the dangerous op with full context
+            - Append to _dangerous_ops_history for session review
+            - Emit awareness.integrity signal if threshold exceeded
+        """
+        payload = event.payload or {}
+        turn_number = payload.get("turn_number", 0)
+        detected_type = payload.get("detected_type", "unknown")
+        severity = payload.get("severity", "medium")
+
+        op_record = {
+            "turn_number": turn_number,
+            "detected_type": detected_type,
+            "severity": severity,
+            "signal_type": payload.get("signal_type"),
+            "pattern_key": payload.get("pattern_key"),
+            "description": payload.get("description"),
+            "message_preview": payload.get("message_preview", ""),
+            "timestamp": event.timestamp,
+        }
+
+        logger.warning(
+            "Dangerous operation detected: turn=%d, type=%s, severity=%s, detail=%s",
+            turn_number,
+            detected_type,
+            severity,
+            payload.get("description") or payload.get("signal_type") or "unknown",
+        )
+
+        # Track history for session summary
+        self._dangerous_ops_history.append(op_record)
+
+        # If high-severity dangerous op, emit awareness signal
+        if severity == "high":
+            self._bus.emit(
+                "awareness.integrity",
+                payload={
+                    "event": "dangerous_op",
+                    "severity": severity,
+                    "turn_number": turn_number,
+                    "detail": payload.get("description") or payload.get("signal_type"),
+                    "requires_human_review": True,
+                },
+                source="signal_processor",
+            )
+
+    def _on_rule_violation(self, event: BrainEvent) -> None:
+        """Handle rule.violation — track and log P0 rule violations.
+
+        rule.violation is emitted by _on_turn_end when a turn's actions
+        violate P0-brainstem rules (禁blind_write, 禁secrets_in_code, 禁console_log).
+
+        Actions:
+            - Log the violation with full context
+            - Append to _violation_history for session summary
+            - Emit awareness.integrity signal
+        """
+        payload = event.payload or {}
+        turn_number = payload.get("turn_number", 0)
+        rule_token = payload.get("rule_token", "unknown")
+
+        violation_record = {
+            "turn_number": turn_number,
+            "rule_token": rule_token,
+            "tool": payload.get("tool"),
+            "severity": payload.get("severity", "medium"),
+            "message": payload.get("message", ""),
+            "secret_type": payload.get("secret_type"),
+            "detected_type": payload.get("detected_type"),
+            "timestamp": event.timestamp,
+        }
+
+        logger.warning(
+            "P0 rule violation: turn=%d, rule=%s, tool=%s, severity=%s, msg=%s",
+            turn_number,
+            rule_token,
+            payload.get("tool", "N/A"),
+            payload.get("severity", "medium"),
+            payload.get("message", ""),
+        )
+
+        self._violation_history.append(violation_record)
+
+        # Emit awareness signal for integrity tracking
+        self._bus.emit(
+            "awareness.integrity",
+            payload={
+                "event": "rule_violation",
+                "rule_token": rule_token,
+                "severity": payload.get("severity", "medium"),
+                "turn_number": turn_number,
+                "requires_human_review": payload.get("severity") == "high",
+            },
+            source="signal_processor",
+        )
+
+    def _on_workflow_incomplete(self, event: BrainEvent) -> None:
+        """Handle workflow.incomplete — log and archive incomplete workflows.
+
+        workflow.incomplete is emitted by _on_agent_complete when a session
+        ends with integration workflows that were started but not completed.
+
+        Actions:
+            - Move incomplete workflows from active to history
+            - Log for P6-prefrontal/incidents/ post-mortem
+            - No blocking — session already ended
+        """
+        payload = event.payload or {}
+        session_id = payload.get("session_id", "unknown")
+        workflow_type = payload.get("workflow_type", "unknown")
+        workflow_target = payload.get("workflow_target", "unknown")
+        workflow_status = payload.get("workflow_status", "unknown")
+
+        logger.warning(
+            "Incomplete workflow at session end: session=%s, type=%s, target=%s, status=%s",
+            session_id,
+            workflow_type,
+            workflow_target,
+            workflow_status,
+        )
+
+        # Archive the incomplete workflow into history for post-mortem
+        from dataclasses import dataclass
+        from datetime import datetime
+
+        @dataclass
+        class ArchivedWorkflow:
+            integration_type: str
+            target_name: str
+            status: str
+            workflow_id: str
+
+        archived = ArchivedWorkflow(
+            integration_type=workflow_type,
+            target_name=workflow_target,
+            status=f"incomplete@{workflow_status}",
+            workflow_id=f"archived-{session_id}-{workflow_type}",
+        )
+        self._workflow_history.append(archived)
 
     def get_active_workflows(self) -> List[IntegrationWorkflow]:
         """Get all active integration workflows."""

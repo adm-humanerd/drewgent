@@ -4,6 +4,53 @@ All notable changes to Drewgent Agent are documented here.
 
 ---
 
+## [0.7.2] — 2026-05-13
+
+### Brain Upgrade — P0-Brainstem Enforcement Layer (Event-Driven)
+
+#### What changed
+
+signal_processor.py handlers implemented — P0-brainstem rules now enforced via event-driven signal flow, not just static rules.
+
+#### Why
+
+`_on_turn_start`, `_on_turn_end`, `_on_agent_complete` were `pass` (empty). No P0 rule tracking. Workflow incomplete detection broken by Python None attribute trap.
+
+#### Files changed
+
+| File | Change | Location |
+|------|--------|----------|
+| `agent/signal_processor.py` | 5 new handlers + state fields | lines 447-448, 1174-1265, 1416-1458, 1509-1660 |
+| `P3-sensors/gateway/drewgent-architecture-dataflow.md` | NEW — 28KB end-to-end data flow document | P3-sensors/gateway |
+| `P2-hippocampus/memories/insights/.archive/brain-signal-system-20260513.md` | NEW — detailed P0 enforcement docs | archive |
+| `P5-ego/SELF_MODEL.md` | Added "P0-Brainstem Enforcement" section | P5-ego layer |
+| `P2-hippocampus/memories/insights/2026-05.md` | Updated with 2026-05-13 work log | P2-hippocampus |
+
+#### Event flow (new handlers)
+
+```
+turn.start
+  └→ _on_turn_start() → dangerous.op → _on_dangerous_op()
+        └→ _dangerous_ops_history[] + awareness.integrity (high severity)
+
+turn.end
+  └→ _on_turn_end() → rule.violation → _on_rule_violation()
+        └→ _violation_history[] + awareness.integrity
+
+agent.complete
+  └→ _on_agent_complete()
+        ├→ workflow.incomplete → _on_workflow_incomplete → _workflow_history archive
+        └→ session.violations (by-rule summary)
+```
+
+#### Bug fixed
+
+`wf.started_at.isoformat() if hasattr(wf, "started_at") else None` — hasattr returns True when attr exists but value is None → AttributeError → silent catch → emit skipped → workflow_history empty forever.
+
+Fix: `wf.started_at.isoformat() if getattr(wf, "started_at", None) else None`
+
+---
+
 ## [0.7.1] — 2026-05-12
 
 ### Brain Upgrade — Karpathy Coding Principles

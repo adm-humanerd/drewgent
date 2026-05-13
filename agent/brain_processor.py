@@ -149,6 +149,14 @@ class BrainProcessor:
                         "content": neuron.content or "",
                         "weight": neuron.weight,
                     })
+                # Include sublayer neurons
+                for sublayer in layer.sublayers:
+                    for neuron in sublayer.neurons:
+                        self._layer_neurons[layer.name].append({
+                            "name": neuron.name,
+                            "content": neuron.content or "",
+                            "weight": neuron.weight,
+                        })
 
             # Flatten into brain rules list for fast lookup
             self._brain_rules = []

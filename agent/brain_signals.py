@@ -374,7 +374,7 @@ def emit_turn_start(turn_number: int, user_message: str) -> None:
     Phase 3-1: Connects run_agent.py fusion loop → signal bus →
     signal_processor._on_turn_start().
     """
-    get_signal_emitter()._bus.emit(
+    get_signal_emitter()._get_event_bus().emit(
         "turn.start",
         payload={"turn_number": turn_number, "user_message": user_message},
         source="brain_signals",
@@ -391,7 +391,7 @@ def emit_turn_end(
     Phase 3-1: Connects run_agent.py fusion loop → signal bus →
     signal_processor._on_turn_end().
     """
-    get_signal_emitter()._bus.emit(
+    get_signal_emitter()._get_event_bus().emit(
         "turn.end",
         payload={
             "turn_number": turn_number,
@@ -409,7 +409,7 @@ def emit_qa_gate(task_id: str, phase: str, evidence_dir: str) -> None:
     (contract/micro/full). signal_processor._on_qa_gate() validates
     that the required evidence file exists.
     """
-    get_signal_emitter()._bus.emit(
+    get_signal_emitter()._get_event_bus().emit(
         "qa.gate",
         payload={"task_id": task_id, "phase": phase, "evidence_dir": evidence_dir},
         source="brain_signals",
@@ -422,7 +422,7 @@ def emit_agent_complete(session_id: str, message_count: int) -> None:
     Phase 3-1: Connects run_agent.py final cleanup → signal bus →
     signal_processor._on_agent_complete() for P0-brainstem final verification.
     """
-    get_signal_emitter()._bus.emit(
+    get_signal_emitter()._get_event_bus().emit(
         "agent.complete",
         payload={"session_id": session_id, "message_count": message_count},
         source="brain_signals",
