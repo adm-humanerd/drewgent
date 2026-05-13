@@ -112,7 +112,14 @@ from agent.prompt_builder import (
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     OPENAI_MODEL_EXECUTION_GUIDANCE,
 )
-from agent.brain_signals import get_signal_emitter
+from agent.brain_signals import (
+    emit_turn_start,
+    emit_turn_end,
+    emit_qa_gate,
+    emit_agent_complete,
+    get_signal_emitter,
+)
+from agent.brain_processor import get_brain_processor
 from agent.signal_processor import get_signal_processor
 from agent.awareness_reporter import get_awareness_reporter
 from agent.usage_pricing import estimate_usage_cost, normalize_usage
@@ -166,6 +173,62 @@ def _build_self_model_hint() -> str:
                 if len(lines) > 40:
                     truncated += f"\n\n[... INTEGRATION_PROTOCOL truncated: {len(lines)-40} more lines. Use file tools to read.]"
                 parts.append(f"# Integration Protocol (Tool/Skill Absorption Procedure)\n\n{truncated}")
+
+        return "\n\n".join(parts) if parts else ""
+    except Exception:
+        return ""
+
+
+def _build_prefrontal_hint() -> str:
+    """Build P6-prefrontal strategic context for the system prompt.
+
+    Reads active plans and recent incidents from P6-prefrontal/
+    so the agent has strategic awareness of ongoing objectives,
+    tracked incidents, and growth priorities.
+    """
+    try:
+        from drewgent_cli.config import get_drewgent_home
+
+        Drew_HOME = get_drewgent_home()
+        p6_dir = Drew_HOME / "P6-prefrontal"
+
+        parts = []
+
+        # Active plans — most recent .md file in plans/
+        plans_dir = p6_dir / "plans"
+        if plans_dir.exists():
+            plan_files = sorted(
+                [f for f in plans_dir.iterdir() if f.suffix == ".md" and f.name != ".DS_Store"],
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )
+            if plan_files:
+                content = plan_files[0].read_text(encoding="utf-8").strip()
+                if content:
+                    lines = content.split("\n")
+                    truncated = "\n".join(lines[:50])
+                    if len(lines) > 50:
+                        truncated += f"\n\n[... {plan_files[0].name} truncated: {len(lines)-50} more lines. Use file tools to read.]"
+                    parts.append(f"# P6-Prefrontal — Active Plan ({plan_files[0].name})\n\n{truncated}")
+
+        # Recent incidents — last 3 .md files in incidents/
+        incidents_dir = p6_dir / "incidents"
+        if incidents_dir.exists():
+            incident_files = sorted(
+                [f for f in incidents_dir.iterdir() if f.suffix == ".md" and f.name != ".DS_Store"],
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )[:3]
+            if incident_files:
+                incident_parts = []
+                for f in incident_files:
+                    content = f.read_text(encoding="utf-8").strip()
+                    lines = content.split("\n")
+                    truncated = "\n".join(lines[:15])
+                    if len(lines) > 15:
+                        truncated += f"\n[... {len(lines)-15} more lines]"
+                    incident_parts.append(f"## {f.stem}\n{truncated}")
+                parts.append(f"# P6-Prefrontal — Recent Incidents\n\n" + "\n\n".join(incident_parts))
 
         return "\n\n".join(parts) if parts else ""
     except Exception:
@@ -3068,6 +3131,8 @@ class AIAgent:
                 "tools": self.tools or [],
                 "message_count": len(cleaned),
                 "messages": cleaned,
+                # Phase 1-3: brain decision log per turn
+                "brain_decision_log": getattr(self, "_brain_decision_log", []) or [],
             }
 
             atomic_json_write(
@@ -3413,6 +3478,11 @@ class AIAgent:
         self_model_hint = _build_self_model_hint()
         if self_model_hint:
             prompt_parts.append(self_model_hint)
+
+        # P6-prefrontal strategic context — plans and incidents
+        prefrontal_hint = _build_prefrontal_hint()
+        if prefrontal_hint:
+            prompt_parts.append(prefrontal_hint)
 
         if not self.skip_context_files:
             # Use TERMINAL_CWD for context file discovery when set (gateway
@@ -8664,6 +8734,58 @@ class AIAgent:
         if _injected_parts:
             user_message = user_message + "\n\n" + "\n\n".join(_injected_parts)
 
+        # ── Brain Decision (Phase 1-1) ─────────────────────────────────────
+        # 매 퓨전 시작 시 brain_processor.decide()를 호출하여
+        # task_type 분류 + rules_to_fire + hints 생성.
+        # 모든 퓨전에서 실행 (일반 코딩/리서치 포함).
+        _brain_decision_str = ""
+        _brain_decision = None
+        try:
+            _bp_dec = get_brain_processor()
+            _brain_decision = _bp_dec.decide(
+                user_message=original_user_message,
+                assistant_message="",
+                tool_calls=None,
+                tool_results=None,
+            )
+            _brain_decision_str = _bp_dec.render_decision(_brain_decision)
+        except Exception as _bp_err:
+            logger.debug("BrainProcessor decide() unavailable: %s", _bp_err)
+
+        # ── Phase 1-3: Record brain decision to session log ─────────────
+        # 퓨전 로그에 hints + layers_to_consult 기록.
+        # _session_messages는 self의 멤버로 초기화되어 있음.
+        if _brain_decision is not None:
+            try:
+                _decision_entry = {
+                    "turn": api_call_count + 1,  # 0-based api_call_count, 1-based turn
+                    "task_type": _brain_decision.task_type,
+                    "confidence": _brain_decision.confidence,
+                    "layers_to_consult": _brain_decision.layers_to_consult,
+                    "hints": _brain_decision.hints,
+                    "rules_fired": [
+                        {"name": r.get("name"), "layer": r.get("layer"), "weight": r.get("weight")}
+                        for r in (_brain_decision.rules_to_fire or [])
+                    ],
+                }
+                if not hasattr(self, "_brain_decision_log"):
+                    self._brain_decision_log: List[Dict] = []
+                self._brain_decision_log.append(_decision_entry)
+            except Exception:
+                pass  # Non-critical: logging should never break the turn
+
+        if _brain_decision_str:
+            user_message = user_message + "\n\n" + _brain_decision_str
+
+        # ── Phase 3-2: Emit turn.start event (P0-brainstem pre-validation) ──
+        try:
+            emit_turn_start(
+                turn_number=api_call_count + 1,
+                user_message=original_user_message,
+            )
+        except Exception as _e:
+            logger.debug("emit_turn_start failed: %s", _e)
+
         while (
             api_call_count < self.max_iterations and self.iteration_budget.remaining > 0
         ):
@@ -11196,6 +11318,29 @@ class AIAgent:
                 )
             except Exception as exc:
                 logger.warning("post_llm_call hook failed: %s", exc)
+
+        # ── Phase 3-2: Emit turn.end event (P0-brainstem post-verification) ──
+        # Fires after each turn completes — before on_session_end.
+        try:
+            emit_turn_end(
+                turn_number=api_call_count + 1,
+                assistant_response=final_response or "",
+                tool_calls=[
+                    tc for tc in (messages[-1].get("tool_calls", []) if messages else [])
+                ],
+            )
+        except Exception as _e:
+            logger.debug("emit_turn_end failed: %s", _e)
+
+        # ── Phase 3-2: Emit agent.complete event (P0-brainstem final gate) ──
+        # Fires once per run_conversation() — the true session boundary.
+        try:
+            emit_agent_complete(
+                session_id=self.session_id,
+                message_count=len(messages),
+            )
+        except Exception as _e:
+            logger.debug("emit_agent_complete failed: %s", _e)
 
         # Extract reasoning from the last assistant message (if any)
         last_reasoning = None

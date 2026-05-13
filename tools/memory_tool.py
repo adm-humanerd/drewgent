@@ -399,10 +399,18 @@ class MemoryStore:
         if not raw.strip():
             return []
 
-        # Use ENTRY_DELIMITER for consistency with _write_file. Splitting by "§"
+# Use ENTRY_DELIMITER for consistency with _write_file. Splitting by "\n§\n"
         # alone would incorrectly split entries that contain "§" in their content.
-        entries = [e.strip() for e in raw.split(ENTRY_DELIMITER)]
-        return [e for e in entries if e]
+        raw_entries = [e.strip() for e in raw.split(ENTRY_DELIMITER) if e.strip()]
+
+        # Skip Obsidian auto-generated frontmatter/wiki nav (entry[0] starts with ---)
+        # This prevents structural metadata from leaking into the memory block.
+        if raw_entries and raw_entries[0].startswith("---"):
+            raw_entries = raw_entries[1:]
+
+        # Strip leading §\n from entries that have it (artifact of writing file with § delimiter).
+        # After split by ENTRY_DELIMITER ("\n§\n"), entries start with "§\n" (no leading newline).
+        return [e[2:] if e.startswith("§\n") else e for e in raw_entries]
 
     @staticmethod
     def _write_file(path: Path, entries: List[str]):
