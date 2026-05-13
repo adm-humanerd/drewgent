@@ -173,7 +173,6 @@ def _discover_tools():
 
         # Test tool
         "tools.super_tool",
-
         # Orchestrator tool (external)
         "orchestrate_tool",
     ]
