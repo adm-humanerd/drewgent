@@ -3312,6 +3312,23 @@ class GatewayRunner:
 
             response = agent_result.get("final_response") or ""
             agent_messages = agent_result.get("messages", [])
+
+            # ── HP-3: QA gate — block delivery if gate failed ─────────────────
+            # Garry Tan Complexity Ratchet: delivery is blocked until QA evidence
+            # confirms all criteria met. Non-latent tasks (qa_gate_status=None)
+            # always pass.
+            _qa_gate_status = agent_result.get("qa_gate_status")
+            if _qa_gate_status is False:
+                response = (
+                    "⚠️ **QA Gate Failed** — delivery blocked.\n\n"
+                    "This task requires QA verification before delivery.\n"
+                    "Run: `/brain qa {task_id}` to review evidence and approve."
+                )
+                logger.warning(
+                    "[HP-3] QA gate blocked delivery: session=%s chat=%s",
+                    session_key, source.chat_id,
+                )
+
             _response_time = time.time() - _msg_start_time
             _api_calls = agent_result.get("api_calls", 0)
             _resp_len = len(response)

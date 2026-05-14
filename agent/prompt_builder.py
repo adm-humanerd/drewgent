@@ -218,6 +218,23 @@ SKILLS_GUIDANCE = (
     "Skills that aren't maintained become liabilities."
 )
 
+QA_GUIDANCE_TEMPLATE = (
+    "# QA Self-Verification (HP-3 — Garry Tan Complexity Ratchet)\n"
+    "This is a LATENT TASK that requires QA evidence before delivery.\n"
+    "Your task_id: {task_id}\n\n"
+    "You MUST follow the contract-first QA flow:\n"
+    "1. CONTRACT phase: Before writing any code, write acceptance criteria to:\n"
+    "   ~/.drewgent/P2-hippocampus/qa-evidence/{task_id}/contract.json\n"
+    "   Format: {{\"criteria\": [\"criterion 1\", \"criterion 2\", ...]}}\n\n"
+    "2. MICRO phase (after each significant step): Record what you verified to:\n"
+    "   ~/.drewgent/P2-hippocampus/qa-evidence/{task_id}/micro-qa.json\n"
+    "   Format: {{\"step\": \"<step name>\", \"verified\": true/false, \"notes\": \"<what was checked>\"}}\n\n"
+    "3. FULL phase (before completing): Confirm all contract criteria are met.\n"
+    "   Update: ~/.drewgent/P2-hippocampus/qa-evidence/{task_id}/full-qa.json\n"
+    "   Format: {{\"all_criteria_met\": true/false, \"evidence\": [\"<proof of criterion N>\", ...]}}\n\n"
+    "IMPORTANT: If all_criteria_met is False, delivery will be BLOCKED."
+)
+
 TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "# Tool-use enforcement\n"
     "You MUST use your tools to take action — do not describe what you would do "

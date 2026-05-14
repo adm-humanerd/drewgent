@@ -446,6 +446,7 @@ class SignalProcessor:
         self._correlation_workflow_map: Dict[str, str] = {}
         self._violation_history: List[dict] = []
         self._dangerous_ops_history: List[dict] = []
+        self._latent_tool_count: int = 0  # HP-2: track latent tool calls (delegate, mcp)
 
         # Subscribe to relevant signals
         self._setup_subscriptions()
@@ -796,6 +797,10 @@ class SignalProcessor:
         payload = event.payload
         tool_name = payload.get("tool", "")
         session_id = payload.get("session_id", "")
+
+        # HP-2: Track latent tool calls (delegate, mcp) — tools requiring judgment/synthesis
+        if tool_name in ("delegate", "mcp"):
+            self._latent_tool_count += 1
 
         # Track tool execution for tool_call_count
         workflow = self._get_workflow_for_corr_id(event.correlation_id)
@@ -1390,6 +1395,39 @@ class SignalProcessor:
                     task_id, phase, _required_file,
                 )
             else:
+                # Phase 1 (HP-3): auto-generate skeleton if file missing
+                try:
+                    _timestamp = datetime.now().isoformat()
+                    if phase == "contract":
+                        _skeleton = {
+                            "task_id": task_id,
+                            "phase": "contract",
+                            "criteria": ["<What needs to be verified before delivery>"],
+                            "created": _timestamp,
+                        }
+                    elif phase == "micro":
+                        _skeleton = {
+                            "task_id": task_id,
+                            "step": "<step name>",
+                            "verified": False,
+                            "notes": "<what was checked>",
+                        }
+                    else:  # "full"
+                        _skeleton = {
+                            "task_id": task_id,
+                            "phase": "full",
+                            "all_criteria_met": False,
+                            "evidence": [],
+                            "verified_at": _timestamp,
+                        }
+                    os.makedirs(evidence_dir, exist_ok=True)
+                    import json
+                    with open(_file_path, "w") as f:
+                        json.dump(_skeleton, f, indent=2)
+                    logger.info("QA auto-generated %s skeleton: %s", phase, _file_path)
+                except Exception as ex:
+                    logger.debug("QA auto-generation failed (non-fatal): %s", ex)
+
                 logger.warning(
                     "QA gate FAILED: task=%s phase=%s — required file '%s' not found in %s. "
                     "Task delivery BLOCKED until evidence is recorded.",

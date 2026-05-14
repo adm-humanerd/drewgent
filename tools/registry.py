@@ -27,10 +27,12 @@ class ToolEntry:
     __slots__ = (
         "name", "toolset", "schema", "handler", "check_fn",
         "requires_env", "is_async", "description", "emoji",
+        "latent",
     )
 
     def __init__(self, name, toolset, schema, handler, check_fn,
-                 requires_env, is_async, description, emoji):
+                 requires_env, is_async, description, emoji,
+                 latent=False):
         self.name = name
         self.toolset = toolset
         self.schema = schema
@@ -40,6 +42,7 @@ class ToolEntry:
         self.is_async = is_async
         self.description = description
         self.emoji = emoji
+        self.latent = latent
 
 
 class ToolRegistry:
@@ -64,6 +67,7 @@ class ToolRegistry:
         is_async: bool = False,
         description: str = "",
         emoji: str = "",
+        latent: bool = False,
     ):
         """Register a tool.  Called at module-import time by each tool file."""
         existing = self._tools.get(name)
@@ -83,6 +87,7 @@ class ToolRegistry:
             is_async=is_async,
             description=description or schema.get("description", ""),
             emoji=emoji,
+            latent=latent,
         )
         if check_fn and toolset not in self._toolset_checks:
             self._toolset_checks[toolset] = check_fn
@@ -186,6 +191,11 @@ class ToolRegistry:
         """Return the emoji for a tool, or *default* if unset."""
         entry = self._tools.get(name)
         return (entry.emoji if entry and entry.emoji else default)
+
+    def get_latent(self, name: str) -> bool:
+        """Return whether a tool requires latent (judgment) execution."""
+        entry = self._tools.get(name)
+        return entry.latent if entry else False
 
     def get_tool_to_toolset_map(self) -> Dict[str, str]:
         """Return ``{tool_name: toolset_name}`` for every registered tool."""

@@ -87,6 +87,7 @@ from agent.prompt_builder import (
     MEMORY_GUIDANCE,
     SESSION_SEARCH_GUIDANCE,
     SKILLS_GUIDANCE,
+    QA_GUIDANCE_TEMPLATE,
     build_nous_subscription_prompt,
 )
 from agent.model_metadata import (
@@ -568,6 +569,47 @@ _BUDGET_WARNING_RE = re.compile(
     r"\[BUDGET(?:\s+WARNING)?:\s+Iteration\s+\d+/\d+\..*?\]",
     re.DOTALL,
 )
+
+
+# ── Latent task detection ─────────────────────────────────────────────────────
+
+_LATENT_KEYWORDS = (
+    "implement", "build", "create", "design", "research",
+    "analyze", "write code", "develop", "architect",
+    "coding task", "refactor",
+)
+
+
+def _is_latent_task(user_message: str) -> bool:
+    """Detect latent (judgment/synthesis) tasks that benefit from QA gates.
+
+    HP-2: Latent vs deterministic — tasks requiring model judgment/synthesis
+    should go through QA contract-first flow (Garry Tan pattern).
+    """
+    if not user_message:
+        return False
+    msg_lower = user_message.lower()
+    return any(kw in msg_lower for kw in _LATENT_KEYWORDS)
+
+
+def _qa_evidence_dir_for_task(task_id: str) -> str:
+    """Return the QA evidence directory path for a given task_id."""
+    import os
+    return os.path.join(
+        os.path.expanduser("~/.drewgent"),
+        "P2-hippocampus", "qa-evidence", task_id,
+    )
+
+
+def _emit_qa_gate_for_task(task_id: str, phase: str) -> None:
+    """Emit qa.gate for a task, creating evidence_dir if needed."""
+    import os
+    evidence_dir = _qa_evidence_dir_for_task(task_id)
+    os.makedirs(evidence_dir, exist_ok=True)
+    try:
+        emit_qa_gate(task_id=task_id, phase=phase, evidence_dir=evidence_dir)
+    except Exception:
+        pass  # Brain signals are best-effort
 
 
 def _sanitize_surrogates(text: str) -> str:
@@ -3357,6 +3399,11 @@ class AIAgent:
             tool_guidance.append(SKILLS_GUIDANCE)
         if tool_guidance:
             prompt_parts.append(" ".join(tool_guidance))
+
+        # HP-3: Inject QA self-verification guidance when this is a latent task
+        if hasattr(self, "_qa_task_id") and self._qa_task_id:
+            _qa_prompt = QA_GUIDANCE_TEMPLATE.format(task_id=self._qa_task_id)
+            prompt_parts.append(_qa_prompt)
 
         # Brain governance (NeuronFS) - loaded after session search guidance
         # This renders the active brain's 7-layer subsumption hierarchy
@@ -8405,6 +8452,16 @@ class AIAgent:
         # Generate unique task_id if not provided to isolate VMs between concurrent tasks
         effective_task_id = task_id or str(uuid.uuid4())
 
+        # ── HP-3: QA gate — contract phase for latent tasks ───────────────────
+        # Garry Tan Complexity Ratchet: QA contract must exist before delivery.
+        # Emit contract phase now so evidence skeleton is ready before implementation.
+        if _is_latent_task(user_message):
+            _emit_qa_gate_for_task(effective_task_id, "contract")
+            # Track so micro/full phases fire at turn-end and agent-complete
+            self._qa_task_id = effective_task_id
+        else:
+            self._qa_task_id = None
+
         # Reset retry counters and iteration budget at the start of each turn
         # so subagent usage from a previous turn doesn't eat into the next one.
         self._invalid_tool_retries = 0
@@ -8415,6 +8472,7 @@ class AIAgent:
         self._last_content_with_tools = None
         self._mute_post_response = False
         self._surrogate_sanitized = False
+        self._qa_task_id: str = None  # HP-3: set when latent task contract fires
 
         # Pre-turn connection health check: detect and clean up dead TCP
         # connections left over from provider outages or dropped streams.
@@ -11332,6 +11390,12 @@ class AIAgent:
         except Exception as _e:
             logger.debug("emit_turn_end failed: %s", _e)
 
+        # ── HP-3: QA gate — micro phase for latent tasks ────────────────────
+        # Emit micro phase at the end of each turn for latent tasks.
+        # Micro evidence accumulates across turns (Garry Tan pattern).
+        if self._qa_task_id:
+            _emit_qa_gate_for_task(self._qa_task_id, "micro")
+
         # ── Phase 3-2: Emit agent.complete event (P0-brainstem final gate) ──
         # Fires once per run_conversation() — the true session boundary.
         try:
@@ -11341,6 +11405,12 @@ class AIAgent:
             )
         except Exception as _e:
             logger.debug("emit_agent_complete failed: %s", _e)
+
+        # ── HP-3: QA gate — full phase for latent tasks ─────────────────────
+        # Emit full phase after agent completes. This is the final delivery gate.
+        if self._qa_task_id:
+            _emit_qa_gate_for_task(self._qa_task_id, "full")
+            self._qa_task_id = None  # Clear after full gate fires
 
         # Extract reasoning from the last assistant message (if any)
         last_reasoning = None
@@ -11441,6 +11511,22 @@ class AIAgent:
         # provider before the second message. Actual session-end cleanup is
         # handled by the CLI (atexit / /reset) and gateway (session expiry /
         # _reset_session).
+
+        # ── HP-3: QA gate — record delivery status in result ─────────────────
+        # Pass qa_gate_status to gateway so it can block delivery if gate failed.
+        _qa_gate_status = None
+        if self._qa_task_id:
+            try:
+                import os, json
+                _qa_evidence_dir = _qa_evidence_dir_for_task(self._qa_task_id)
+                _full_evidence_path = os.path.join(_qa_evidence_dir, "full-qa.json")
+                if os.path.isfile(_full_evidence_path):
+                    with open(_full_evidence_path) as _f:
+                        _qa_data = json.load(_f)
+                        _qa_gate_status = _qa_data.get("all_criteria_met", False)
+            except Exception:
+                _qa_gate_status = False
+        result["qa_gate_status"] = _qa_gate_status
 
         # Plugin hook: on_session_end
         # Fired at the very end of every run_conversation call.
