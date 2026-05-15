@@ -3318,11 +3318,12 @@ class GatewayRunner:
             # confirms all criteria met. Non-latent tasks (qa_gate_status=None)
             # always pass.
             _qa_gate_status = agent_result.get("qa_gate_status")
+            _qa_task_id_for_blocking = agent_result.get("_qa_task_id_for_gateway", "unknown")
             if _qa_gate_status is False:
                 response = (
-                    "⚠️ **QA Gate Failed** — delivery blocked.\n\n"
-                    "This task requires QA verification before delivery.\n"
-                    "Run: `/brain qa {task_id}` to review evidence and approve."
+                    f"⚠️ **QA Gate Failed** — delivery blocked.\n\n"
+                    f"This task requires QA verification before delivery.\n"
+                    f"Run: `/brain qa {_qa_task_id_for_blocking}` to review evidence and approve."
                 )
                 logger.warning(
                     "[HP-3] QA gate blocked delivery: session=%s chat=%s",

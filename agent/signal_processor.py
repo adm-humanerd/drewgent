@@ -1406,11 +1406,30 @@ class SignalProcessor:
                             "created": _timestamp,
                         }
                     elif phase == "micro":
+                        # HP-3 fix: accumulate steps across turns (array, not single object)
+                        # Backward-compat: treat existing single-object file as {"steps": [that_object]}
+                        import json as _json
+                        _existing_steps = []
+                        if os.path.isfile(_file_path):
+                            try:
+                                with open(_file_path) as _ef:
+                                    _existing = _json.load(_ef)
+                                    if isinstance(_existing, list):
+                                        _existing_steps = _existing
+                                    elif isinstance(_existing, dict) and "steps" in _existing:
+                                        _existing_steps = _existing["steps"]
+                                    elif isinstance(_existing, dict):
+                                        # legacy single-object format — convert
+                                        _existing_steps = [_existing]
+                            except Exception:
+                                _existing_steps = []
                         _skeleton = {
                             "task_id": task_id,
-                            "step": "<step name>",
-                            "verified": False,
-                            "notes": "<what was checked>",
+                            "steps": _existing_steps + [{
+                                "step": "<step name>",
+                                "verified": False,
+                                "notes": "<what was checked>",
+                            }],
                         }
                     else:  # "full"
                         _skeleton = {

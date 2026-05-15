@@ -11409,8 +11409,11 @@ class AIAgent:
         # ── HP-3: QA gate — full phase for latent tasks ─────────────────────
         # Emit full phase after agent completes. This is the final delivery gate.
         if self._qa_task_id:
+            _qa_task_id_for_result = self._qa_task_id  # capture before clear
             _emit_qa_gate_for_task(self._qa_task_id, "full")
             self._qa_task_id = None  # Clear after full gate fires
+            # Store task_id in result so gateway can show it in blocking message
+            result["_qa_task_id_for_gateway"] = _qa_task_id_for_result
 
         # Extract reasoning from the last assistant message (if any)
         last_reasoning = None
